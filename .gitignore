@@ -1,0 +1,10 @@
+.env
+data/local-store.json
+server.log
+server.err.log
+server.out.log
+cloudflared.log
+cloudflared-fixed.log
+cloudflared-config.yml
+node_modules
+.wrangler

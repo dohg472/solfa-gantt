@@ -1,0 +1,493 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>솔파 간트</title>
+    <link rel="stylesheet" href="/styles.css" />
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <div class="app">
+      <header class="topbar">
+        <div class="brand">
+          <div class="brand-mark" aria-hidden="true"></div>
+          <div>
+            <h1>솔파 간트</h1>
+            <p id="connectionLine">불러오는 중</p>
+          </div>
+        </div>
+        <div class="toolbar" role="toolbar" aria-label="간트 도구">
+          <label class="search">
+            <span aria-hidden="true">⌕</span>
+            <input id="searchInput" type="search" placeholder="검색" autocomplete="off" />
+            <button id="searchPrevButton" type="button" title="이전 검색 결과" aria-label="이전 검색 결과">‹</button>
+            <button id="searchNextButton" type="button" title="다음 검색 결과" aria-label="다음 검색 결과">›</button>
+          </label>
+          <div class="view-mode" aria-label="작업 보기">
+            <button class="view-mode-button is-active" data-view-mode="all" type="button">전체</button>
+            <button class="view-mode-button" data-view-mode="ops" type="button">운영</button>
+            <button class="view-mode-button" data-view-mode="review" type="button">검토</button>
+            <button class="view-mode-button" data-view-mode="shoot" type="button">촬영</button>
+            <button class="view-mode-button" data-view-mode="upload" type="button">업로드</button>
+          </div>
+          <div class="segment" aria-label="보기 범위">
+            <button class="segment-button" data-zoom="day" type="button">일</button>
+            <button class="segment-button is-active" data-zoom="week" type="button">주</button>
+            <button class="segment-button" data-zoom="month" type="button">월</button>
+          </div>
+          <button id="collapseAllButton" class="ghost-button compact-button" type="button">접기</button>
+          <button id="expandAllButton" class="ghost-button compact-button" type="button">펼치기</button>
+          <button id="densityButton" class="toggle-button is-active" type="button">촘촘</button>
+          <button id="dependencyToggleButton" class="toggle-button is-active" type="button">연결선</button>
+          <button id="rescheduleToggleButton" class="toggle-button is-active" type="button">후속</button>
+          <button id="criticalToggleButton" class="toggle-button is-active" type="button">핵심</button>
+          <button id="baselineToggleButton" class="toggle-button" type="button">기준선</button>
+          <button id="completedToggleButton" class="toggle-button" type="button">완료</button>
+          <button id="filterButton" class="ghost-button compact-button" type="button">필터</button>
+          <button id="todayButton" class="ghost-button" type="button">오늘</button>
+          <button id="reviewButton" class="ghost-button compact-button" type="button">검토</button>
+          <button id="hiddenManagerButton" class="ghost-button compact-button" type="button">숨김</button>
+          <button id="activityButton" class="ghost-button compact-button" type="button">기록</button>
+          <button id="operationButton" class="ghost-button compact-button" type="button">운영</button>
+          <button id="undoButton" class="icon-button" title="실행 취소" aria-label="실행 취소" type="button" disabled>↶</button>
+          <button id="redoButton" class="icon-button" title="다시 실행" aria-label="다시 실행" type="button" disabled>↷</button>
+          <button id="refreshButton" class="icon-button" title="새로고침" aria-label="새로고침" type="button">↻</button>
+          <button id="newTaskButton" class="primary-button" type="button">새 작업</button>
+        </div>
+      </header>
+
+      <div id="statusBanner" class="status-banner" hidden>
+        <div>
+          <strong id="statusBannerTitle">운영 상태 확인</strong>
+          <span id="statusBannerDetail"></span>
+        </div>
+        <button id="statusBannerButton" type="button">운영 열기</button>
+      </div>
+
+      <div id="opsSummary" class="ops-summary" hidden></div>
+
+      <main id="layout" class="layout">
+        <section class="gantt-panel" aria-label="간트 차트">
+          <div id="ganttScroll" class="gantt-scroll">
+            <div id="ganttContent" class="gantt-content">
+              <div class="table-head">
+                <span>채널 / 프로젝트 / 상세일정</span>
+                <span>기간</span>
+              </div>
+              <div class="timeline-head">
+                <div id="monthHeader" class="month-header"></div>
+                <div id="tickHeader" class="tick-header"></div>
+              </div>
+              <div id="taskTable" class="task-table"></div>
+              <button id="tableResizeHandle" class="table-resize-handle" type="button" title="목록 폭 조정" aria-label="목록 폭 조정"></button>
+              <div id="timelineBody" class="timeline-body">
+                <div id="gridLayer" class="grid-layer"></div>
+                <div id="todayLine" class="today-line" hidden></div>
+                <svg id="dependencyLayer" class="dependency-layer" aria-hidden="true"></svg>
+                <div id="barLayer" class="bar-layer"></div>
+              </div>
+            </div>
+          </div>
+          <div id="timelineNavigator" class="timeline-navigator" aria-label="타임라인 개요" hidden>
+            <div id="timelineNavigatorTrack" class="timeline-navigator-track"></div>
+            <button id="timelineNavigatorWindow" class="timeline-navigator-window" type="button" aria-label="보이는 기간 이동"></button>
+          </div>
+          <div id="selectionBox" class="selection-box" hidden></div>
+          <div id="emptyState" class="empty-state" hidden>표시할 작업이 없습니다</div>
+          <div id="selectionBar" class="selection-bar" hidden>
+            <strong id="selectionCount">0개 선택</strong>
+            <span id="selectionSummary" class="selection-summary"></span>
+            <button id="selectionShiftBackButton" class="ghost-button compact-button" type="button">-1일</button>
+            <button id="selectionShiftForwardButton" class="ghost-button compact-button" type="button">+1일</button>
+            <button id="selectionResizeBackButton" class="ghost-button compact-button" title="선택 일정 종료일을 하루 줄이기" type="button">기간-1</button>
+            <button id="selectionResizeForwardButton" class="ghost-button compact-button" title="선택 일정 종료일을 하루 늘리기" type="button">기간+1</button>
+            <button id="selectionStatusButton" class="ghost-button compact-button" type="button">상태</button>
+            <button id="selectionDoneButton" class="ghost-button compact-button" type="button">완료</button>
+            <button id="selectionBulkEditButton" class="ghost-button compact-button" type="button">일괄 수정</button>
+            <button id="selectionLinkButton" class="ghost-button compact-button" type="button">연결</button>
+            <button id="selectionUnlinkButton" class="ghost-button compact-button" type="button">연결 해제</button>
+            <button id="selectionHideButton" class="ghost-button compact-button" type="button">숨기기</button>
+            <button id="selectionDeleteButton" class="danger-button compact-button" type="button">삭제</button>
+            <button id="selectionClearButton" class="icon-button small-icon-button" title="선택 해제" aria-label="선택 해제" type="button">×</button>
+          </div>
+          <div id="colorLegend" class="color-legend" aria-label="색상 범례"></div>
+          <div id="dragTooltip" class="drag-tooltip" hidden></div>
+        </section>
+
+        <aside id="editor" class="editor" aria-label="작업 편집">
+          <div class="editor-head">
+            <div>
+              <span id="sourceBadge" class="source-badge">로컬</span>
+              <h2 id="editorTitle">새 작업</h2>
+            </div>
+            <button id="closeEditorButton" class="icon-button" title="닫기" aria-label="닫기" type="button">×</button>
+          </div>
+
+          <form id="taskForm" class="task-form">
+            <label>
+              <span>채널</span>
+              <input id="channelField" name="channel" type="text" autocomplete="off" />
+            </label>
+            <label>
+              <span>프로젝트</span>
+              <input id="projectField" name="project" type="text" autocomplete="off" />
+            </label>
+            <label>
+              <span>상세일정</span>
+              <input id="detailField" name="detail" type="text" list="detailOptions" autocomplete="off" />
+              <datalist id="detailOptions"></datalist>
+              <div id="detailPresetButtons" class="detail-presets" aria-label="상세일정 빠른 선택"></div>
+            </label>
+            <label>
+              <span>노션 제목</span>
+              <input id="titleField" name="title" type="text" autocomplete="off" required />
+            </label>
+            <label>
+              <span>내용</span>
+              <textarea id="descriptionField" name="description" rows="4"></textarea>
+            </label>
+            <div class="form-grid">
+              <label>
+                <span>시작</span>
+                <input id="startField" name="start" type="date" required />
+              </label>
+              <label>
+                <span>종료</span>
+                <input id="endField" name="end" type="date" required />
+              </label>
+            </div>
+            <label>
+              <span>상태</span>
+              <input id="statusField" name="status" type="text" list="statusOptions" autocomplete="off" />
+              <datalist id="statusOptions"></datalist>
+            </label>
+            <label>
+              <span>담당</span>
+              <input id="assigneeField" name="assignee" type="text" autocomplete="off" />
+            </label>
+            <fieldset class="color-field">
+              <legend>색상</legend>
+              <div id="colorSwatches" class="color-swatches"></div>
+              <input id="colorField" name="color" type="hidden" />
+            </fieldset>
+            <div class="editor-actions">
+              <button id="deleteButton" class="danger-button" type="button">삭제</button>
+              <button class="primary-button" type="submit">저장</button>
+            </div>
+          </form>
+        </aside>
+      </main>
+
+      <div id="contextMenu" class="context-menu" hidden>
+        <div id="contextMenuSummary" class="context-menu-summary"></div>
+        <button id="contextCreateButton" type="button">새 일정 만들기</button>
+        <button id="contextRenameButton" type="button">이름 수정</button>
+        <button id="contextMergeButton" type="button">프로젝트 병합</button>
+        <button id="contextEditButton" type="button">편집 열기</button>
+        <button id="contextDoneButton" type="button">완료 처리</button>
+        <button id="contextHideButton" type="button">숨기기</button>
+        <button id="contextDeleteButton" class="danger-menu-item" type="button">삭제</button>
+        <div id="contextDateDivider" class="context-divider" role="separator"></div>
+        <button id="contextMoveButton" type="button">이 날짜로 이동</button>
+        <button id="contextStartButton" type="button">시작일 설정</button>
+        <button id="contextEndButton" type="button">종료일 설정</button>
+      </div>
+      <div id="filterPanelBackdrop" class="panel-backdrop" hidden></div>
+      <aside id="filterPanel" class="hidden-panel" aria-label="보기 필터" hidden>
+        <div class="hidden-panel-head">
+          <div>
+            <span class="source-badge">보기</span>
+            <h2>필터</h2>
+          </div>
+          <button id="closeFilterPanelButton" class="icon-button" title="닫기" aria-label="닫기" type="button">×</button>
+        </div>
+        <p id="filterSummary" class="hidden-summary">전체 보기</p>
+        <section class="hidden-section">
+          <h3>조건</h3>
+          <div class="filter-select-grid">
+            <label class="filter-field">
+              <span>채널</span>
+              <select id="channelFilterSelect"></select>
+            </label>
+            <label class="filter-field">
+              <span>상세일정</span>
+              <select id="detailFilterSelect"></select>
+            </label>
+            <label class="filter-field">
+              <span>상태</span>
+              <select id="statusFilterSelect"></select>
+            </label>
+            <label class="filter-field">
+              <span>담당</span>
+              <select id="assigneeFilterSelect"></select>
+            </label>
+            <label class="filter-field">
+              <span>기간</span>
+              <select id="dateFilterSelect">
+                <option value="">전체 기간</option>
+                <option value="active">진행 중</option>
+                <option value="upcoming">오늘 이후</option>
+                <option value="next30">향후 30일</option>
+                <option value="overdue">지난 미완료</option>
+              </select>
+            </label>
+            <label class="filter-field">
+              <span>업무</span>
+              <select id="kindFilterSelect">
+                <option value="">전체 업무</option>
+                <option value="shoot">촬영</option>
+                <option value="edit">편집</option>
+                <option value="upload">업로드</option>
+              </select>
+            </label>
+            <label class="filter-field">
+              <span>검토</span>
+              <select id="issueFilterSelect">
+                <option value="">전체 검토</option>
+                <option value="issue">검토 필요</option>
+                <option value="upload-only">업로드만 확인</option>
+                <option value="missing-upload">업로드 없음</option>
+              </select>
+            </label>
+          </div>
+        </section>
+        <section class="hidden-section">
+          <h3>빠른 보기</h3>
+          <div class="filter-chip-row">
+            <button type="button" data-filter-preset="active">진행 중</button>
+            <button type="button" data-filter-preset="next30">향후 30일</button>
+            <button type="button" data-filter-preset="shoot">촬영</button>
+            <button type="button" data-filter-preset="upload">업로드</button>
+            <button type="button" data-filter-preset="issue">검토 필요</button>
+            <button type="button" data-filter-preset="upload-only">업로드만</button>
+            <button type="button" data-filter-preset="missing-upload">업로드 없음</button>
+          </div>
+        </section>
+        <section class="hidden-section">
+          <h3>현재 보기</h3>
+          <div id="filterMetrics" class="status-list"></div>
+        </section>
+        <div class="filter-actions">
+          <button id="resetFilterButton" class="ghost-button" type="button">필터 초기화</button>
+        </div>
+      </aside>
+      <div id="hiddenPanelBackdrop" class="panel-backdrop" hidden></div>
+      <aside id="hiddenPanel" class="hidden-panel" aria-label="숨김 관리" hidden>
+        <div class="hidden-panel-head">
+          <div>
+            <span class="source-badge">숨김</span>
+            <h2>숨김 관리</h2>
+          </div>
+          <button id="closeHiddenPanelButton" class="icon-button" title="닫기" aria-label="닫기" type="button">×</button>
+        </div>
+        <p id="hiddenSummary" class="hidden-summary">불러오는 중</p>
+        <section class="hidden-section">
+          <h3>채널</h3>
+          <div id="hiddenChannelsList" class="hidden-list"></div>
+        </section>
+        <section class="hidden-section">
+          <h3>프로젝트</h3>
+          <div id="hiddenProjectsList" class="hidden-list"></div>
+        </section>
+        <section class="hidden-section">
+          <h3>프로젝트 전환</h3>
+          <div id="hiddenConvertibleProjectsList" class="hidden-list"></div>
+        </section>
+        <section class="hidden-section">
+          <h3>일정</h3>
+          <div id="hiddenTasksList" class="hidden-list"></div>
+        </section>
+        <section class="hidden-section">
+          <h3>프로젝트 병합</h3>
+          <div id="projectAliasesList" class="hidden-list"></div>
+        </section>
+        <section class="hidden-section">
+          <h3>검토 확인</h3>
+          <div id="reviewIgnoresList" class="hidden-list"></div>
+        </section>
+      </aside>
+      <div id="reviewPanelBackdrop" class="panel-backdrop" hidden></div>
+      <aside id="reviewPanel" class="hidden-panel" aria-label="프로젝트 검토" hidden>
+        <div class="hidden-panel-head">
+          <div>
+            <span class="source-badge">검토</span>
+            <h2>프로젝트 검토</h2>
+          </div>
+          <button id="closeReviewPanelButton" class="icon-button" title="닫기" aria-label="닫기" type="button">×</button>
+        </div>
+        <p id="reviewSummary" class="hidden-summary">불러오는 중</p>
+        <label class="panel-search">
+          <span aria-hidden="true">⌕</span>
+          <input id="reviewSearchInput" type="search" placeholder="검토 목록 검색" autocomplete="off" />
+        </label>
+        <div class="filter-chip-row review-filter-row">
+          <button type="button" data-review-query="">전체</button>
+          <button type="button" data-review-query="action">액션</button>
+          <button type="button" data-review-query="high">긴급</button>
+          <button type="button" data-review-query="similar">비슷한 이름</button>
+          <button type="button" data-review-query="upload-only">업로드만</button>
+          <button type="button" data-review-query="missing-upload">업로드 없음</button>
+          <button type="button" data-review-query="completed">완료</button>
+          <button type="button" data-review-query="low">낮음</button>
+        </div>
+        <section class="hidden-section review-priority-section">
+          <div class="review-section-head">
+            <h3>우선 처리 큐</h3>
+          </div>
+          <div id="reviewPriorityQueue" class="operation-review-queue review-priority-queue"></div>
+        </section>
+        <section class="hidden-section">
+          <div class="review-section-head">
+            <h3>비슷한 이름 후보 <span id="reviewSimilarCount" class="review-section-count">0</span></h3>
+            <span>
+              <button type="button" data-review-section-toggle="similar">접기</button>
+              <button type="button" data-review-section-select="similar">표시 선택</button>
+            </span>
+          </div>
+          <div id="reviewSimilarList" class="hidden-list"></div>
+        </section>
+        <section class="hidden-section">
+          <div class="review-section-head">
+            <h3>업로드만 있음 <span id="reviewUploadOnlyCount" class="review-section-count">0</span></h3>
+            <span>
+              <button type="button" data-review-section-toggle="upload-only">펼치기</button>
+              <button type="button" data-review-section-select="upload-only">표시 선택</button>
+              <button type="button" data-review-section-hide="upload-only">표시 숨김</button>
+            </span>
+          </div>
+          <div id="reviewUploadOnlyList" class="hidden-list"></div>
+        </section>
+        <section class="hidden-section">
+          <div class="review-section-head">
+            <h3>업로드 없음 <span id="reviewMissingUploadCount" class="review-section-count">0</span></h3>
+            <span>
+              <button type="button" data-review-section-toggle="missing-upload">펼치기</button>
+              <button type="button" data-review-section-select="missing-upload">표시 선택</button>
+              <button type="button" data-review-section-hide="missing-upload">표시 숨김</button>
+            </span>
+          </div>
+          <div id="reviewMissingUploadList" class="hidden-list"></div>
+        </section>
+        <section class="hidden-section">
+          <div class="review-section-head">
+            <h3>완료 숨김 대상 <span id="reviewCompletedCount" class="review-section-count">0</span></h3>
+            <span>
+              <button type="button" data-review-section-toggle="completed">펼치기</button>
+              <button type="button" data-review-section-select="completed">표시 선택</button>
+              <button type="button" data-review-section-hide="completed">표시 숨김</button>
+            </span>
+          </div>
+          <div id="reviewCompletedList" class="hidden-list"></div>
+        </section>
+      </aside>
+      <div id="activityPanelBackdrop" class="panel-backdrop" hidden></div>
+      <aside id="activityPanel" class="hidden-panel" aria-label="활동 기록" hidden>
+        <div class="hidden-panel-head">
+          <div>
+            <span class="source-badge">기록</span>
+            <h2>활동 기록</h2>
+          </div>
+          <button id="closeActivityPanelButton" class="icon-button" title="닫기" aria-label="닫기" type="button">×</button>
+        </div>
+        <p id="activitySummary" class="hidden-summary">불러오는 중</p>
+        <div id="activityList" class="hidden-list"></div>
+      </aside>
+      <div id="operationPanelBackdrop" class="panel-backdrop" hidden></div>
+      <aside id="operationPanel" class="hidden-panel" aria-label="운영 상태" hidden>
+        <div class="hidden-panel-head">
+          <div>
+            <span class="source-badge">운영</span>
+            <h2>운영 상태</h2>
+          </div>
+          <button id="closeOperationPanelButton" class="icon-button" title="닫기" aria-label="닫기" type="button">×</button>
+        </div>
+        <p id="operationSummary" class="hidden-summary">불러오는 중</p>
+        <section class="hidden-section">
+          <h3>완성 조건</h3>
+          <div id="operationReadinessList" class="status-list"></div>
+        </section>
+        <section class="hidden-section">
+          <h3>임베드</h3>
+          <div id="embedStatusList" class="status-list"></div>
+          <div class="copy-row">
+            <input id="embedUrlField" type="text" readonly aria-label="임베드 주소" />
+            <button id="copyEmbedUrlButton" type="button">복사</button>
+            <button id="installNotionEmbedButton" type="button">노션에 등록</button>
+          </div>
+          <div class="copy-row tunnel-row">
+            <input id="tunnelUrlField" type="text" readonly aria-label="임시 공개 주소" />
+            <button id="startTunnelButton" type="button">임시 주소 켜기</button>
+            <button id="stopTunnelButton" type="button">끄기</button>
+          </div>
+          <p id="tunnelStatusText" class="operation-note">임시 주소는 테스트용입니다. 고정 운영은 고정 주소 설정을 사용하세요.</p>
+        </section>
+        <section class="hidden-section">
+          <h3>고정 주소 설정</h3>
+          <div id="operationSetupList" class="status-list"></div>
+          <div class="copy-row embed-config-row">
+            <input id="publicUrlField" type="text" placeholder="https://gantt.example.com" aria-label="고정 공개 주소" />
+            <button id="savePublicUrlButton" type="button">주소 저장</button>
+            <button id="clearPublicUrlButton" type="button">초기화</button>
+          </div>
+          <div id="fixedCommandRow" class="copy-row command-row" hidden>
+            <input id="fixedCommandField" type="text" readonly aria-label="고정 터널 실행 명령" />
+            <button id="copyFixedCommandButton" type="button">명령 복사</button>
+          </div>
+        </section>
+        <section class="hidden-section">
+          <h3>운영 액션</h3>
+          <div id="operationActionsList" class="operation-actions"></div>
+        </section>
+        <section class="hidden-section">
+          <h3>데이터</h3>
+          <div id="operationMetrics" class="operation-grid"></div>
+        </section>
+        <section class="hidden-section">
+          <h3>품질 점검</h3>
+          <div id="operationQualityList" class="status-list"></div>
+        </section>
+        <section class="hidden-section">
+          <h3>검토 신호</h3>
+          <div id="operationReviewList" class="status-list"></div>
+        </section>
+      </aside>
+      <div id="impactModalBackdrop" class="modal-backdrop" hidden></div>
+      <section id="impactModal" class="impact-modal" role="dialog" aria-modal="true" aria-labelledby="impactTitle" hidden>
+        <div class="impact-head">
+          <div>
+            <span class="source-badge">변경 확인</span>
+            <h2 id="impactTitle">후속 일정 영향</h2>
+          </div>
+          <button id="impactCancelIconButton" class="icon-button" title="취소" aria-label="취소" type="button">×</button>
+        </div>
+        <p id="impactSummary" class="impact-summary">확인 중</p>
+        <div id="impactGuard" class="impact-guard"></div>
+        <div id="impactList" class="impact-list"></div>
+        <div class="impact-actions">
+          <button id="impactCancelButton" class="ghost-button" type="button">취소</button>
+          <button id="impactConfirmButton" class="primary-button" type="button">저장</button>
+        </div>
+      </section>
+      <div id="inputModalBackdrop" class="modal-backdrop" hidden></div>
+      <section id="inputModal" class="input-modal" role="dialog" aria-modal="true" aria-labelledby="inputTitle" hidden>
+        <div class="impact-head">
+          <div>
+            <span id="inputBadge" class="source-badge">입력</span>
+            <h2 id="inputTitle">값 입력</h2>
+          </div>
+          <button id="inputCancelIconButton" class="icon-button" title="취소" aria-label="취소" type="button">×</button>
+        </div>
+        <p id="inputSummary" class="impact-summary">변경할 값을 입력하세요</p>
+        <form id="inputForm" class="input-form">
+          <div id="inputFields" class="input-fields"></div>
+          <div class="impact-actions">
+            <button id="inputCancelButton" class="ghost-button" type="button">취소</button>
+            <button id="inputConfirmButton" class="primary-button" type="submit">저장</button>
+          </div>
+        </form>
+      </section>
+      <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+    </div>
+  </body>
+</html>
