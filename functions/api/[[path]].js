@@ -1275,7 +1275,10 @@ function httpError(status, message) {
 }
 
 function json(data, status = 200) {
-  return Response.json(data, { status, headers: noStoreHeaders() });
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: noStoreHeaders({ "Content-Type": "application/json; charset=utf-8" }),
+  });
 }
 
 function text(body, status = 200, headers = {}) {
