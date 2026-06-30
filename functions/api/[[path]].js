@@ -805,11 +805,12 @@ async function pageExists(env, id) {
 }
 
 async function notionRequest(env, endpoint, options = {}) {
-  if (!env.NOTION_TOKEN) throw httpError(400, "NOTION_TOKEN이 Cloudflare 환경변수에 없습니다.");
+  const token = secretValue(env, "NOTION_TOKEN");
+  if (!token) throw httpError(400, "NOTION_TOKEN이 Cloudflare 환경변수에 없습니다.");
   const response = await fetch(`https://api.notion.com${endpoint}`, {
     ...options,
     headers: {
-      Authorization: `Bearer ${env.NOTION_TOKEN}`,
+      Authorization: `Bearer ${token}`,
       "Notion-Version": envValue(env, "NOTION_VERSION") || "2022-06-28",
       "Content-Type": "application/json",
       ...(options.headers || {}),
@@ -927,6 +928,10 @@ function config(env) {
 
 function envValue(env, key) {
   return env?.[key] || DEFAULT_ENV[key] || "";
+}
+
+function secretValue(env, key) {
+  return String(env?.[key] || "").trim().replace(/^["']|["']$/g, "");
 }
 
 function embedInfo(request, env) {
