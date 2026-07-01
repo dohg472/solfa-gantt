@@ -52,6 +52,7 @@ const state = {
   hiddenProjectLeaks: [],
   hiddenProjects: [],
   groupRanges: {},
+  groupNotes: {},
   rowOrder: [],
   rows: [],
   selectedId: "",
@@ -85,6 +86,8 @@ const state = {
   panDrag: null,
   suppressClick: false,
   context: null,
+  editorMode: "task",
+  editorRowId: "",
   collapsedRows: new Set(),
   showDependencies: true,
   rescheduleDependencies: true,
@@ -482,7 +485,11 @@ function bindEvents() {
   els.timelineBody.addEventListener("contextmenu", openTimelineContext);
   els.contextCreateButton.addEventListener("click", createTaskFromContext);
   els.contextEditButton.addEventListener("click", () => {
-    if (state.context?.taskId) selectTask(state.context.taskId);
+    if (["channel", "project"].includes(state.context?.kind)) {
+      openGroupEditorFromContext(state.context);
+    } else if (state.context?.taskId) {
+      selectTask(state.context.taskId);
+    }
     hideContextMenu();
   });
   els.contextRenameButton.addEventListener("click", renameContextGroup);
@@ -640,6 +647,7 @@ function viewPrefsPayload() {
     search: String(state.search || "").trim().slice(0, 160),
     collapsedRows: [...state.collapsedRows].slice(0, 600),
     groupRanges: normalizeGroupRanges(state.groupRanges),
+    groupNotes: normalizeGroupNotes(state.groupNotes),
     rowOrder: normalizeRowOrder(state.rowOrder),
     tableWidth: state.tableWidth || 0,
     updatedAt: new Date().toISOString(),
@@ -685,6 +693,7 @@ function applyViewPrefs(prefs) {
   }
   if (Array.isArray(prefs.collapsedRows)) state.collapsedRows = new Set(prefs.collapsedRows.filter((rowId) => typeof rowId === "string"));
   if (prefs.groupRanges && typeof prefs.groupRanges === "object") state.groupRanges = normalizeGroupRanges(prefs.groupRanges);
+  if (prefs.groupNotes && typeof prefs.groupNotes === "object") state.groupNotes = normalizeGroupNotes(prefs.groupNotes);
   if (Array.isArray(prefs.rowOrder)) state.rowOrder = normalizeRowOrder(prefs.rowOrder);
 }
 
@@ -697,6 +706,7 @@ function canApplyIncomingViewPrefs() {
     !state.createDrag &&
     !state.tableResizeDrag &&
     !state.timelineNavigatorDrag &&
+    !state.panDrag &&
     !state.editorOpen &&
     !state.viewSettingsSaveTimer &&
     els.impactModal.hidden &&
@@ -713,6 +723,16 @@ function normalizeGroupRanges(value) {
     const end = toDateOnly(range.end);
     if (!start || !end) return;
     result[key] = compareDate(end, start) < 0 ? { start, end: start } : { start, end };
+  });
+  return result;
+}
+
+function normalizeGroupNotes(value) {
+  const result = {};
+  Object.entries(value || {}).forEach(([key, note]) => {
+    if (!key || typeof note !== "string") return;
+    const text = note.trim().slice(0, 6000);
+    if (text) result[key] = text;
   });
   return result;
 }
@@ -1225,8 +1245,8 @@ function handleGanttWheel(event) {
   }
 }
 
-function startPanDrag(event) {
-  if (!state.panMode || event.button !== 0) return;
+function startPanDrag(event, options = {}) {
+  if ((!state.panMode && !options.force) || event.button !== 0) return;
   if (state.drag || state.dependencyDrag || state.selectionDrag || state.createDrag || state.tableResizeDrag || state.timelineNavigatorDrag) return;
   if (event.target?.closest?.("input, textarea, select, [contenteditable='true']")) return;
   event.preventDefault();
@@ -3524,6 +3544,11 @@ function renderRows(rows, criticalTaskIds) {
       if (!model) return;
       selectRow(model, event);
     });
+    element.addEventListener("dblclick", (event) => {
+      if (event.target.closest("[data-inline-edit], [data-range-edit], button")) return;
+      const row = state.rows.find((item) => item.id === element.dataset.rowId);
+      if (row) openGroupEditor(row);
+    });
     element.addEventListener("contextmenu", (event) => {
       const row = state.rows.find((item) => item.id === element.dataset.rowId);
       if (row) openRowContext(event, row);
@@ -3993,6 +4018,11 @@ function renderBars(rows, dayWidth, criticalTaskIds) {
         selectRow(row, event);
         event.stopPropagation();
       });
+      bar.addEventListener("dblclick", (event) => {
+        if (event.target.dataset.mode) return;
+        openGroupEditor(row);
+        event.stopPropagation();
+      });
       if (editableGroup) {
         bar.addEventListener("pointerdown", (event) => {
           if (isSelectionModifier(event)) return;
@@ -4426,6 +4456,7 @@ function openRowContext(event, row, date = "") {
   state.context = {
     taskId: !useSelection && row.kind === "task" && taskIds.length === 1 ? row.task.id : "",
     taskIds,
+    rowId: row.id,
     kind: useSelection ? "selection" : row.kind,
     channel: row.channel || row.task?.channel || (row.kind === "channel" ? row.title : ""),
     project: row.kind === "project" ? row.title : row.task?.project || "",
@@ -4440,7 +4471,7 @@ function openRowContext(event, row, date = "") {
   showContextMenu(event.clientX, event.clientY, {
     summary: contextSummary(state.context) || state.context.summary || row.title,
     canCreate: !useSelection && !row.hiddenOnly && (Boolean(date) || ["channel", "project"].includes(row.kind)),
-    canEdit: !useSelection && row.kind === "task" && taskIds.length === 1,
+    canEdit: !useSelection && !row.hiddenOnly && ((row.kind === "task" && taskIds.length === 1) || ["channel", "project"].includes(row.kind)),
     canRename: !useSelection && taskIds.length > 0 && ["channel", "project"].includes(row.kind) && !row.hiddenOnly,
     canMerge: canMergeContextProjects(useSelection ? "selection" : row.kind, taskIds),
     canDone: tasksForIds(taskIds).some((task) => !isDoneTask(task)),
@@ -4850,7 +4881,7 @@ async function renameGroup(context, nextName) {
     confirmText: "이름 저장",
   }))) {
     render();
-    return;
+    return false;
   }
 
   state.tasks = state.tasks.map((task) => (uniqueIds.includes(task.id) ? { ...task, [field]: nextName } : task));
@@ -4867,10 +4898,12 @@ async function renameGroup(context, nextName) {
     pushUndo(`${label} 이름 수정`, () => restoreTaskSnapshots(snapshots));
     render();
     showToast(`${label} 이름을 "${nextName}"으로 바꿨습니다.`);
+    return true;
   } catch (error) {
     state.tasks = previousTasks;
     render();
     showToast(error.message);
+    return false;
   }
 }
 
@@ -6638,6 +6671,8 @@ function applySelection(ids, anchorRowId = "", openEditor = false) {
   state.selectedId = uniqueIds[0] || "";
   state.selectionAnchorRowId = anchorRowId || rowIdForTaskId(state.selectedId) || "";
   state.editorOpen = Boolean(openEditor && uniqueIds.length === 1 && state.selectedId);
+  state.editorMode = "task";
+  state.editorRowId = "";
   if (!state.editorOpen && uniqueIds.length !== 1) hideContextMenu();
 }
 
@@ -6952,6 +6987,10 @@ function rowSelectionClass(row) {
 
 function startSelectionDrag(event, area) {
   if (event.button !== 0 || state.panMode || state.panDrag || state.drag || state.dependencyDrag || state.rowReorderDrag || state.createDrag || state.timelineNavigatorDrag) return;
+  if (area === "timeline" && shouldPanEmptyTimeline(event)) {
+    startPanDrag(event, { force: true });
+    return;
+  }
   if (area === "timeline" && event.target.closest(".gantt-bar") && !isSelectionModifier(event)) return;
   if (area === "timeline" && event.altKey) {
     startTimelineCreateDrag(event);
@@ -6970,6 +7009,12 @@ function startSelectionDrag(event, area) {
   event.currentTarget.setPointerCapture?.(event.pointerId);
   window.addEventListener("pointermove", moveSelectionDrag);
   window.addEventListener("pointerup", endSelectionDrag, { once: true });
+}
+
+function shouldPanEmptyTimeline(event) {
+  if (event.altKey || isSelectionModifier(event)) return false;
+  if (event.target.closest(".gantt-bar, button, input, textarea, select, [contenteditable='true']")) return false;
+  return Boolean(event.target.closest("#timelineBody, #gridLayer, #barLayer"));
 }
 
 function moveSelectionDrag(event) {
@@ -7165,6 +7210,8 @@ function rectsIntersect(a, b) {
 }
 
 function selectTask(id) {
+  state.editorMode = "task";
+  state.editorRowId = "";
   const row = state.rows.find((item) => item.kind === "task" && item.task?.id === id);
   if (row) {
     selectRow(row);
@@ -7175,8 +7222,28 @@ function selectTask(id) {
   scheduleSelectedRangeFocus([id], { center: true });
 }
 
+function openGroupEditorFromContext(context) {
+  if (!context || !["channel", "project"].includes(context.kind)) return;
+  const row = state.rows.find((item) => item.id === context.rowId) || state.rows.find((item) => item.kind === context.kind && item.title === context.title);
+  if (row) openGroupEditor(row);
+}
+
+function openGroupEditor(row) {
+  if (!row || !["channel", "project"].includes(row.kind)) return;
+  state.editorMode = "group";
+  state.editorRowId = row.id;
+  state.editorOpen = true;
+  state.selectedId = "";
+  state.selectedIds = new Set(taskIdsForRow(row));
+  state.selectionAnchorRowId = row.id;
+  hideContextMenu();
+  render();
+}
+
 function closeEditor() {
   state.editorOpen = false;
+  state.editorMode = "task";
+  state.editorRowId = "";
   hideContextMenu();
   render();
 }
@@ -7186,6 +7253,8 @@ function clearSelection(shouldRender = true) {
   state.selectedIds.clear();
   state.selectionAnchorRowId = "";
   state.editorOpen = false;
+  state.editorMode = "task";
+  state.editorRowId = "";
   hideContextMenu();
   if (shouldRender) render();
 }
@@ -10083,12 +10152,17 @@ async function deleteReviewIgnoreFromPanel(button) {
 }
 
 function syncEditor() {
-  const task = selectedTask();
-  const isOpen = state.editorOpen && task;
+  const groupRow = state.editorMode === "group" ? editorGroupRow() : null;
+  const task = state.editorMode === "group" ? null : selectedTask();
+  const isGroupOpen = state.editorOpen && groupRow;
+  const isTaskOpen = state.editorOpen && task;
+  const isOpen = Boolean(isGroupOpen || isTaskOpen);
   els.editor.hidden = !isOpen;
   els.layout.classList.toggle("editor-closed", !isOpen);
+  els.editor.classList.toggle("is-group-editor", Boolean(isGroupOpen));
 
   if (!isOpen) {
+    setTaskEditorFieldMode();
     els.editorTitle.textContent = "상세일정";
     els.sourceBadge.textContent = "선택 없음";
     els.titleField.value = "";
@@ -10106,6 +10180,12 @@ function syncEditor() {
     return;
   }
 
+  if (isGroupOpen) {
+    syncGroupEditor(groupRow);
+    return;
+  }
+
+  setTaskEditorFieldMode();
   els.editorTitle.textContent = `${task.project || task.title} · ${task.detail || "상세일정"}`;
   els.sourceBadge.textContent = sourceLabel(task);
   els.titleField.value = task.title;
@@ -10120,6 +10200,83 @@ function syncEditor() {
   renderSwatches(task.color);
   renderDetailPresets(task.detail);
   els.deleteButton.disabled = false;
+}
+
+function editorGroupRow() {
+  return state.rows.find((row) => row.id === state.editorRowId && ["channel", "project"].includes(row.kind));
+}
+
+function syncGroupEditor(row) {
+  setGroupEditorFieldMode(row);
+  const label = groupKindLabel(row.kind);
+  els.editorTitle.textContent = `${row.title} · ${label}`;
+  els.sourceBadge.textContent = "간트 메모";
+  els.channelField.value = row.kind === "channel" ? row.title : row.channel || "";
+  els.projectField.value = row.kind === "project" ? row.title : "";
+  els.detailField.value = "";
+  els.titleField.value = row.title;
+  els.descriptionField.value = state.groupNotes?.[row.id] || "";
+  els.startField.value = row.start || todayString();
+  els.endField.value = row.end || row.start || todayString();
+  els.statusField.value = "";
+  els.assigneeField.value = "";
+  renderSwatches(row.color || PALETTE[0]);
+  renderDetailPresets("");
+  els.deleteButton.disabled = true;
+}
+
+function setTaskEditorFieldMode() {
+  setEditorFieldVisible(els.channelField, true);
+  setEditorFieldVisible(els.projectField, true);
+  setEditorFieldVisible(els.detailField, true);
+  setEditorFieldVisible(els.titleField, true);
+  setEditorFieldVisible(els.descriptionField, true);
+  setEditorFieldVisible(els.startField, true);
+  setEditorFieldVisible(els.endField, true);
+  setEditorFieldVisible(els.statusField, true);
+  setEditorFieldVisible(els.assigneeField, true);
+  setEditorFieldVisible(els.colorField, true);
+  els.channelField.disabled = false;
+  els.projectField.disabled = false;
+  els.detailField.disabled = false;
+  els.titleField.disabled = false;
+  els.titleField.required = true;
+  els.statusField.disabled = false;
+  els.assigneeField.disabled = false;
+  els.colorField.disabled = false;
+  els.descriptionField.rows = 4;
+}
+
+function setGroupEditorFieldMode(row) {
+  setEditorFieldVisible(els.channelField, true);
+  setEditorFieldVisible(els.projectField, row.kind === "project");
+  setEditorFieldVisible(els.detailField, false);
+  setEditorFieldVisible(els.titleField, false);
+  setEditorFieldVisible(els.descriptionField, true);
+  setEditorFieldVisible(els.startField, true);
+  setEditorFieldVisible(els.endField, true);
+  setEditorFieldVisible(els.statusField, false);
+  setEditorFieldVisible(els.assigneeField, false);
+  setEditorFieldVisible(els.colorField, false);
+  els.channelField.disabled = row.kind === "project";
+  els.projectField.disabled = row.kind !== "project";
+  els.detailField.disabled = true;
+  els.titleField.disabled = true;
+  els.titleField.required = false;
+  els.statusField.disabled = true;
+  els.assigneeField.disabled = true;
+  els.colorField.disabled = true;
+  els.descriptionField.rows = 12;
+}
+
+function setEditorFieldVisible(field, visible) {
+  const block = field?.closest?.("label") || field?.closest?.("fieldset");
+  if (block) block.hidden = !visible;
+  if (field) field.disabled = !visible;
+}
+
+function groupKindLabel(kind) {
+  return kind === "channel" ? "채널" : "프로젝트";
 }
 
 async function newTask() {
@@ -10239,7 +10396,96 @@ async function createTask(seed) {
   }
 }
 
+async function saveGroupEditor() {
+  const row = editorGroupRow();
+  if (!row) {
+    showToast("편집할 그룹을 찾지 못했습니다.");
+    closeEditor();
+    return;
+  }
+
+  const previousRanges = { ...(state.groupRanges || {}) };
+  const previousNotes = { ...(state.groupNotes || {}) };
+  const label = groupKindLabel(row.kind);
+  const oldRowId = row.id;
+  const nextName = (row.kind === "channel" ? els.channelField.value : els.projectField.value).trim() || row.title;
+  const normalizedStart = els.startField.value || row.start || todayString();
+  const normalizedEnd = compareDate(els.endField.value || normalizedStart, normalizedStart) < 0 ? normalizedStart : els.endField.value || normalizedStart;
+  const nextNote = els.descriptionField.value.trim();
+  let finalRowId = oldRowId;
+
+  if (nextName !== row.title) {
+    if (!taskIdsForRow(row).length) {
+      showToast(`일정이 없는 ${label}은 이름 대신 기간과 내용만 저장했습니다.`);
+    } else {
+      const renamed = await renameGroup(contextForGroupRow(row), nextName);
+      if (!renamed) {
+        syncEditor();
+        return;
+      }
+      finalRowId = rowIdAfterGroupRename(row, nextName);
+    }
+  }
+
+  if (finalRowId !== oldRowId) {
+    delete state.groupRanges[oldRowId];
+    delete state.groupNotes[oldRowId];
+  }
+  setGroupRangeOverride(finalRowId, { start: normalizedStart, end: normalizedEnd });
+  state.groupNotes = { ...(state.groupNotes || {}) };
+  if (nextNote) state.groupNotes[finalRowId] = nextNote;
+  else delete state.groupNotes[finalRowId];
+  state.editorRowId = finalRowId;
+
+  const prefsChanged = JSON.stringify(previousRanges) !== JSON.stringify(state.groupRanges || {}) || JSON.stringify(previousNotes) !== JSON.stringify(state.groupNotes || {});
+  if (prefsChanged) {
+    const nextRanges = { ...(state.groupRanges || {}) };
+    const nextNotes = { ...(state.groupNotes || {}) };
+    saveViewPrefs();
+    pushUndo(
+      `${row.title} ${label} 기간/내용 수정`,
+      () => {
+        state.groupRanges = previousRanges;
+        state.groupNotes = previousNotes;
+        saveViewPrefs();
+        render();
+      },
+      () => {
+        state.groupRanges = nextRanges;
+        state.groupNotes = nextNotes;
+        saveViewPrefs();
+        render();
+      },
+    );
+  }
+
+  render();
+  showToast(`${nextName} ${label} 정보를 저장했습니다.`);
+}
+
+function contextForGroupRow(row) {
+  return {
+    taskIds: taskIdsForRow(row),
+    rowId: row.id,
+    kind: row.kind,
+    channel: row.kind === "channel" ? row.title : row.channel || "",
+    project: row.kind === "project" ? row.title : "",
+    title: row.title,
+  };
+}
+
+function rowIdAfterGroupRename(row, nextName) {
+  if (row.kind === "channel") return `channel:${nextName}`;
+  const channel = row.channel || "";
+  return `project:${channel}:${canonicalProjectKey(nextName)}`;
+}
+
 async function saveEditor() {
+  if (state.editorMode === "group") {
+    await saveGroupEditor();
+    return;
+  }
+
   const task = selectedTask();
   if (!task) return;
 
