@@ -358,19 +358,57 @@ async function hideChannel(env, channel) {
   return { hidden: true, channel };
 }
 
+function projectHideGroupsFromBody(body) {
+  const sourceGroups = Array.isArray(body?.groups) ? body.groups : [body];
+  const expanded = [];
+  for (const group of sourceGroups) {
+    if (!group || typeof group !== "object") continue;
+    const primaryProject = group.project || group.title;
+    const projectVariants = Array.isArray(group.projects) ? group.projects : [];
+    const projectValues = primaryProject
+      ? [primaryProject]
+      : projectVariants;
+    const keepTaskIds = Boolean(primaryProject) || projectValues.length === 1;
+    for (const projectValue of projectValues) {
+      const project = normalizeProjectName(projectValue);
+      const channel = normalizeChannelName(group.channel);
+      if (!channel || !project) continue;
+      expanded.push({
+        channel,
+        project,
+        taskIds: keepTaskIds ? uniqueNormalizedLookupIds([...(group.ids || []), ...(group.taskIds || [])]) : [],
+        projects: uniqueNormalizedProjectNames([projectValue, primaryProject, ...projectVariants]),
+      });
+    }
+  }
+  return expanded;
+}
+
+function uniqueNormalizedLookupIds(values) {
+  return [...new Set((values || []).map(normalizeLookupId).filter(Boolean))];
+}
+
+function uniqueNormalizedProjectNames(values) {
+  return [...new Set((values || []).map(normalizeProjectName).filter(Boolean))];
+}
+
 async function hideProjectGroup(env, body) {
-  const groups = Array.isArray(body?.groups) ? body.groups : [body];
+  const groups = projectHideGroupsFromBody(body);
   await mutateStore(env, (store) => {
     for (const group of groups) {
-      const channel = normalizeChannelName(group.channel);
-      const project = normalizeProjectName(group.project || group.title);
+      const channel = group.channel;
+      const project = group.project;
       if (!channel || !project) continue;
-      if (!store.hiddenProjects.some((item) => item.channel === channel && item.project === project)) {
+      const existing = store.hiddenProjects.find((item) => item.channel === channel && item.project === project);
+      if (existing) {
+        existing.taskIds = uniqueNormalizedLookupIds([...(existing.taskIds || []), ...(group.taskIds || [])]);
+        existing.projects = uniqueNormalizedProjectNames([existing.project, ...(existing.projects || []), ...(group.projects || [])]);
+      } else {
         store.hiddenProjects.push({
           channel,
           project,
-          taskIds: [...new Set(group.ids || group.taskIds || [])].map(normalizeLookupId).filter(Boolean),
-          projects: [...new Set([group.project, ...(group.projects || [])].filter(Boolean).map(normalizeProjectName))],
+          taskIds: group.taskIds || [],
+          projects: group.projects || [project],
         });
       }
     }
@@ -1104,18 +1142,37 @@ function isHiddenProjectName(hiddenProjects, task) {
 }
 
 function projectKeysForTask(task) {
-  return [...new Set([task.project, task.title].map(normalizeProjectName).filter(Boolean).flatMap((key) => [key, projectCoreKey(key)]).filter(Boolean))];
+  return [...new Set([task.project, task.title].map(normalizeProjectName).filter(Boolean).flatMap((key) => {
+    const keys = [key];
+    if (!projectEpisodeNumbers(key).size) keys.push(projectCoreKey(key));
+    return keys;
+  }).filter(Boolean))];
 }
 
 function projectKeyMatches(left, right) {
   if (!left || !right) return false;
   if (left === right) return true;
+  if (hasDifferentEpisodeNumbers(left, right)) return false;
   const firstCore = projectCoreKey(left);
   const secondCore = projectCoreKey(right);
   if (firstCore && secondCore && firstCore === secondCore) return true;
   const shorter = left.length <= right.length ? left : right;
   const longer = left.length > right.length ? left : right;
   return shorter.length >= 4 && longer.includes(shorter);
+}
+
+function hasDifferentEpisodeNumbers(left, right) {
+  const leftEpisodes = projectEpisodeNumbers(left);
+  const rightEpisodes = projectEpisodeNumbers(right);
+  if (!leftEpisodes.size || !rightEpisodes.size) return false;
+  for (const episode of leftEpisodes) {
+    if (rightEpisodes.has(episode)) return false;
+  }
+  return true;
+}
+
+function projectEpisodeNumbers(value) {
+  return new Set([...String(value || "").matchAll(/ep(\d+)/gi)].map((match) => match[1]));
 }
 
 function projectCoreKey(value) {
