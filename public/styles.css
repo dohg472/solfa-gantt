@@ -1308,6 +1308,11 @@ body.is-navigator-dragging .timeline-navigator-window {
   box-shadow: 0 2px 8px rgba(23, 107, 101, 0.22);
 }
 
+.gantt-bar.project.is-pause {
+  background: var(--task-color);
+  box-shadow: 0 2px 8px rgba(139, 148, 158, 0.24);
+}
+
 .gantt-bar.project .bar-label {
   font-size: 12px;
   font-weight: 800;

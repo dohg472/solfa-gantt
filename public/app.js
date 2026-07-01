@@ -1698,11 +1698,19 @@ function projectSubtitle(tasks, progress, issue) {
 }
 
 function projectColor(project) {
-  return project?.tasks?.some(isWonheePauseTask) ? PAUSE_COLOR : "#D8842F";
+  return hasPauseProjectSignal(project) ? PAUSE_COLOR : "#D8842F";
 }
 
 function isPauseProject(project) {
-  return Boolean(project?.tasks?.length && project.tasks.every(isWonheePauseTask));
+  return Boolean(isWonheePauseLabel([project?.name, project?.aliasName].filter(Boolean).join(" "))) ||
+    Boolean(project?.tasks?.length && project.tasks.every(isWonheePauseTask));
+}
+
+function hasPauseProjectSignal(project) {
+  return Boolean(
+    isWonheePauseLabel([project?.name, project?.aliasName].filter(Boolean).join(" ")) ||
+    project?.tasks?.some(isWonheePauseTask),
+  );
 }
 
 function pauseProjectDisplayName(tasks) {
