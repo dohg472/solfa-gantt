@@ -1404,7 +1404,7 @@ body.is-navigator-dragging .timeline-navigator-window {
 .gantt-bar:hover .bar-handle,
 .gantt-bar.is-selected .bar-handle,
 body.is-dragging .bar-handle {
-  background: rgba(255, 255, 255, 0.22);
+  background: transparent;
 }
 
 .dependency-dot {
@@ -1587,46 +1587,46 @@ body.is-dragging .gantt-bar.is-partial-selected {
 .bar-handle.left {
   left: -2px;
   cursor: ew-resize;
-  border-radius: 7px 0 0 7px;
+  border-radius: 0;
 }
 
 .bar-handle.right {
   right: -2px;
   cursor: ew-resize;
-  border-radius: 0 7px 7px 0;
+  border-radius: 0;
 }
 
 .gantt-bar.channel .bar-handle {
   top: -9px;
   height: 26px;
-  width: 34px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.16);
+  width: 16px;
+  border-radius: 0;
+  background: transparent;
 }
 
 .gantt-bar.project .bar-handle {
   top: -6px;
   height: 36px;
-  width: 34px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.18);
+  width: 16px;
+  border-radius: 0;
+  background: transparent;
 }
 
 .gantt-bar.channel.is-short-group-bar .bar-handle,
 .gantt-bar.project.is-short-group-bar .bar-handle {
-  width: 30px;
-  background: rgba(32, 33, 36, 0.18);
-  box-shadow: 0 0 0 2px rgba(255, 254, 250, 0.82);
+  width: 16px;
+  background: transparent;
+  box-shadow: none;
 }
 
 .gantt-bar.channel.is-short-group-bar .bar-handle.left,
 .gantt-bar.project.is-short-group-bar .bar-handle.left {
-  left: -32px;
+  left: -2px;
 }
 
 .gantt-bar.channel.is-short-group-bar .bar-handle.right,
 .gantt-bar.project.is-short-group-bar .bar-handle.right {
-  right: -32px;
+  right: -2px;
 }
 
 .gantt-bar.is-clipped-start .bar-handle.left,
@@ -1647,9 +1647,9 @@ body.is-dragging .gantt-bar.is-partial-selected {
   position: absolute;
   top: 50%;
   width: 3px;
-  height: 14px;
+  height: 12px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.82);
+  background: rgba(255, 255, 255, 0.86);
   transform: translateY(-50%);
 }
 
@@ -1660,18 +1660,18 @@ body.is-dragging .bar-handle::after {
   position: absolute;
   top: 50%;
   width: 3px;
-  height: 14px;
+  height: 12px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.82);
+  background: rgba(255, 255, 255, 0.86);
   transform: translateY(-50%);
 }
 
 .bar-handle.left::after {
-  left: 6px;
+  left: 5px;
 }
 
 .bar-handle.right::after {
-  right: 6px;
+  right: 5px;
 }
 
 .bar-move {
