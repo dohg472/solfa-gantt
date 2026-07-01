@@ -410,6 +410,12 @@ function bindEvents() {
   els.undoButton.addEventListener("click", runUndo);
   els.redoButton.addEventListener("click", runRedo);
   els.closeEditorButton.addEventListener("click", closeEditor);
+  els.editor.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape" || !state.editorOpen) return;
+    event.preventDefault();
+    event.stopPropagation();
+    closeEditor();
+  }, { capture: true });
   els.searchInput.addEventListener("input", () => {
     state.search = els.searchInput.value.trim();
     state.searchFocusIndex = -1;
