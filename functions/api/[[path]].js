@@ -440,11 +440,12 @@ async function getHiddenState(env) {
 }
 
 async function restoreHiddenItem(env, body) {
+  const mode = body.mode || body.type;
   await mutateStore(env, (store) => {
-    if (body.mode === "channel") {
+    if (mode === "channel") {
       const channel = normalizeChannelName(body.channel || body.name);
       store.hiddenChannels = store.hiddenChannels.filter((item) => item !== channel);
-    } else if (body.mode === "project") {
+    } else if (mode === "project") {
       const channel = normalizeChannelName(body.channel);
       const project = normalizeProjectName(body.project);
       store.hiddenProjects = store.hiddenProjects.filter((item) => item.channel !== channel || item.project !== project);
@@ -1188,8 +1189,9 @@ function rangeOf(tasks) {
 function hiddenChannelSummaries(tasks, store) {
   const channels = new Map();
   for (const task of tasks || []) {
-    if (isAutoHiddenTask(task) || isHiddenChannelName(store.hiddenChannels, task.channel)) continue;
-    if (!isHiddenTaskId(store.hiddenNotionIds, task.id) && !isHiddenProjectName(store.hiddenProjects, task)) continue;
+    if (isAutoHiddenTask(task)) continue;
+    const hiddenChannel = isHiddenChannelName(store.hiddenChannels, task.channel);
+    if (!hiddenChannel && !isHiddenTaskId(store.hiddenNotionIds, task.id) && !isHiddenProjectName(store.hiddenProjects, task)) continue;
     const key = normalizeChannelName(task.channel);
     if (!channels.has(key)) channels.set(key, { name: task.channel, start: task.start, end: task.end, taskIds: [] });
     const channel = channels.get(key);

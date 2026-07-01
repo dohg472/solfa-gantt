@@ -200,6 +200,7 @@ const els = {
   contextEditButton: document.getElementById("contextEditButton"),
   contextDoneButton: document.getElementById("contextDoneButton"),
   contextHideButton: document.getElementById("contextHideButton"),
+  contextRestoreButton: document.getElementById("contextRestoreButton"),
   contextDeleteButton: document.getElementById("contextDeleteButton"),
   contextDateDivider: document.getElementById("contextDateDivider"),
   contextMoveButton: document.getElementById("contextMoveButton"),
@@ -476,6 +477,7 @@ function bindEvents() {
   els.contextMergeButton.addEventListener("click", mergeContextProjects);
   els.contextDoneButton.addEventListener("click", markContextDone);
   els.contextHideButton.addEventListener("click", hideContextItems);
+  els.contextRestoreButton.addEventListener("click", restoreContextHiddenItem);
   els.contextDeleteButton.addEventListener("click", deleteContextItems);
   els.contextMoveButton.addEventListener("click", () => applyContextDate("move"));
   els.contextStartButton.addEventListener("click", () => applyContextDate("start"));
@@ -1315,7 +1317,7 @@ function buildRows(tasks) {
         if (!shouldKeepHiddenChannel) return null;
         const hiddenLabels = [
           channel.hiddenTaskIds?.length ? `${channel.hiddenTaskIds.length}개 숨김 일정` : "",
-          completedProjects.length ? `${completedProjects.length}개 완료 프로젝트 숨김` : "",
+          completedProjects.length ? `${completedProjects.length}개 프로젝트 숨김` : "",
           reviewBacklogProjects.length ? `${reviewBacklogProjects.length}개 검토 후보 접힘` : "",
           channel.pinnedEmpty ? "표시할 일정 없음" : "",
         ].filter(Boolean);
@@ -1352,7 +1354,7 @@ function buildRows(tasks) {
       title: channel.name,
       subtitle: channel.hiddenOnly
         ? channel.hiddenLabel || `${channel.hiddenTaskIds?.length || 0}개 숨김 일정`
-        : [`${channel.projects.length}개 프로젝트`, `${channel.tasks.length}개 일정`, channelComposition, `진행 ${channelProgress}%`].filter(Boolean).join(" · "),
+        : [`${channel.projects.length}개 프로젝트`, `${channel.tasks.length}개 일정`, channelComposition].filter(Boolean).join(" · "),
       start: channel.range.start,
       end: channel.range.end,
       color: "#176B65",
@@ -1398,7 +1400,7 @@ function buildRows(tasks) {
             id: task.id,
             kind: "task",
             title: task.detail || task.title,
-            subtitle: [task.status, task.assignee].filter(Boolean).join(" · "),
+            subtitle: "",
             start: task.start,
             end: task.end,
             color: task.color,
@@ -1419,7 +1421,7 @@ function projectSubtitle(tasks, progress, issue) {
   if (issue?.label) {
     return [issue.reason, composition, count].filter(Boolean).join(" · ");
   }
-  return [count, composition, `진행 ${progress}%`].filter(Boolean).join(" · ");
+  return [count, composition].filter(Boolean).join(" · ");
 }
 
 function hiddenStubMatchesCurrentView(stub) {
@@ -1527,6 +1529,15 @@ function isPastProductionOnlyProject(tasks) {
   if (!tasks.every(isProductionTask)) return false;
   if (tasks.some(isActiveTask)) return false;
   return compareDate(rangeOf(tasks).end, todayString()) < 0;
+}
+
+function isPastFinishedProject(tasks) {
+  const list = tasks || [];
+  if (!list.length) return false;
+  if (list.some(isActiveTask)) return false;
+  if (list.some(isUploadTask) || list.some(isProductionTask) || isMissingUploadProject(list)) return false;
+  const range = rangeOf(list);
+  return compareDate(range.end, todayString()) < 0 && daysBetween(range.end, todayString()) >= STALE_REVIEW_BACKLOG_DAYS;
 }
 
 function isProductionTask(task) {
@@ -2397,6 +2408,17 @@ function projectVisibilityState(tasks) {
     };
   }
 
+  if (isPastFinishedProject(list)) {
+    return {
+      kind: "past-finished",
+      label: "",
+      tone: "muted",
+      reason: "기간이 지난 단독 일정이라 기본 숨김 대상입니다",
+      hiddenByDefault: true,
+      composition,
+    };
+  }
+
   if (list.every(isDoneTask)) {
     return {
       kind: "done",
@@ -2459,18 +2481,16 @@ function latestEndForTasks(tasks) {
 
 function healthForTasks(tasks) {
   const list = tasks || [];
-  if (!list.length) return { label: "숨김", tone: "muted" };
+  if (!list.length) return { label: "", tone: "muted" };
   const status = projectVisibilityState(list);
-  return { label: status.label, tone: status.tone };
+  if (["missing-upload", "upload-only"].includes(status.kind)) {
+    return { label: status.label, tone: status.tone };
+  }
+  return { label: "", tone: status.tone };
 }
 
 function healthForTask(task) {
-  if (!task) return { label: "", tone: "muted" };
-  if (isDoneTask(task)) return { label: "완료", tone: "ok" };
-  if (compareDate(task.end, todayString()) < 0) return { label: "지연", tone: "bad" };
-  if (isActiveTask(task)) return { label: "진행", tone: "active" };
-  if (compareDate(task.start, todayString()) > 0) return { label: "예정", tone: "muted" };
-  return { label: task.status || "대기", tone: "muted" };
+  return { label: "", tone: "muted" };
 }
 
 function criticalTaskIdsForRows(rows) {
@@ -3066,8 +3086,11 @@ function renderRows(rows, criticalTaskIds) {
       const nameTitle = row.hiddenOnly ? row.title : `${row.title} · 더블클릭해 이름 수정`;
       const rangeTitle = row.hiddenOnly ? range : `${range} · 더블클릭해 기간 수정`;
       if (row.kind === "task") {
-        const meta = row.subtitle || sourceLabel(row.task);
+        const meta = row.subtitle || "";
         const metaTitle = `${meta} · 더블클릭해 상태/담당 수정`;
+        const metaMarkup = meta
+          ? `<span class="task-meta" data-meta-edit="true" title="${escapeHtml(metaTitle)}">${escapeHtml(meta)}</span>`
+          : "";
         return `
           <div class="task-row${selected}${critical}${dependencyConflict}${workloadConflict}" role="button" tabindex="0" data-task-id="${escapeHtml(row.id)}" style="--task-color:${row.color};--progress:${row.progress}%">
             <span class="task-main level-task">
@@ -3079,7 +3102,7 @@ function renderRows(rows, criticalTaskIds) {
                   ${dependencyConflictChipMarkup(row)}
                   ${workloadRiskChipMarkup(row)}
                 </span>
-                <span class="task-meta" data-meta-edit="true" title="${escapeHtml(metaTitle)}">${escapeHtml(meta)}</span>
+                ${metaMarkup}
               </span>
             </span>
             <span class="task-range" data-range-edit="true" title="${escapeHtml(rangeTitle)}">${range}</span>
@@ -3187,9 +3210,7 @@ function dependencyConflictChipMarkup(row) {
 }
 
 function workloadRiskChipMarkup(row) {
-  const count = Number(row?.workloadRiskCount || 0);
-  if (!count) return "";
-  return `<span class="task-health warn" title="담당자 중복 배정 ${count}건">담당 ${count}</span>`;
+  return "";
 }
 
 function progressMiniMarkup(row) {
@@ -4040,6 +4061,7 @@ function openRowContext(event, row, date = "") {
     channel: row.channel || row.task?.channel || "",
     project: row.kind === "project" ? row.title : row.task?.project || "",
     title: useSelection ? `${taskIds.length}개 선택` : row.title,
+    hiddenOnly: Boolean(row.hiddenOnly),
     date,
   };
   render();
@@ -4050,6 +4072,7 @@ function openRowContext(event, row, date = "") {
     canRename: !useSelection && ["channel", "project"].includes(row.kind) && !row.hiddenOnly,
     canMerge: canMergeContextProjects(useSelection ? "selection" : row.kind, taskIds),
     canDone: tasksForIds(taskIds).some((task) => !isDoneTask(task)),
+    canRestore: !useSelection && row.hiddenOnly,
     hasDate: Boolean(date),
     kind: state.context.kind,
   });
@@ -4063,9 +4086,12 @@ function showContextMenu(x, y, options) {
   els.contextMergeButton.hidden = !options.canMerge;
   els.contextEditButton.hidden = !options.canEdit;
   els.contextDoneButton.hidden = !options.canDone;
+  els.contextRestoreButton.hidden = !options.canRestore;
   els.contextDoneButton.textContent = contextActionLabel(options.kind, "완료 처리");
   els.contextHideButton.textContent = contextActionLabel(options.kind, "숨기기");
+  els.contextHideButton.hidden = Boolean(options.canRestore);
   els.contextDeleteButton.textContent = contextActionLabel(options.kind, "삭제");
+  els.contextDeleteButton.hidden = Boolean(options.canRestore);
   els.contextDateDivider.hidden = !options.hasDate;
   [els.contextMoveButton, els.contextStartButton, els.contextEndButton].forEach((button) => {
     button.hidden = !options.hasDate;
@@ -4355,6 +4381,27 @@ async function hideContextItems() {
   await hideIdsRespectingProjectScope(context.taskIds, contextLabel(context));
 }
 
+async function restoreContextHiddenItem() {
+  const context = state.context;
+  if (!context) return;
+  hideContextMenu();
+  const body = {
+    type: context.kind,
+    channel: context.channel || context.title,
+    project: context.project || context.title,
+    id: context.taskId || context.taskIds?.[0] || "",
+  };
+  if (!(await confirmRestoreHiddenPreview(body, context.title, contextSummary(context)))) return;
+  try {
+    await restoreHidden(body);
+    await loadTasks();
+    if (!els.hiddenPanel.hidden) await loadHiddenState();
+    showToast("숨김을 복구했습니다.");
+  } catch (error) {
+    showToast(error.message);
+  }
+}
+
 async function deleteContextItems() {
   const context = state.context;
   if (!context?.taskIds?.length) return;
@@ -4491,7 +4538,7 @@ async function hideChannel(channelName) {
     emptyMessage: "현재 화면에 표시된 일정은 없지만, 채널 숨김 규칙이 저장됩니다.",
   }))) return;
   state.tasks = state.tasks.filter((task) => !sameChannelName(task.channel, channelName));
-  state.channelStubs = state.channelStubs.filter((stub) => !sameChannelName(stub.name, channelName));
+  state.channelStubs = channelStubsAfterHide(previousStubs, hiddenTasks, state.tasks);
   state.selectedIds.clear();
   state.selectedId = "";
   state.editorOpen = false;
