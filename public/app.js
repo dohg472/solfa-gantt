@@ -3566,7 +3566,7 @@ function renderRows(rows, criticalTaskIds) {
       if (state.suppressClick) return;
       const model = state.rows.find((item) => item.id === element.dataset.rowId);
       if (!model) return;
-      selectRow(model, event);
+      selectRow(model, event, { focusTimeline: false });
     });
     element.addEventListener("dblclick", (event) => {
       if (event.target.closest("[data-inline-edit], [data-range-edit], button")) return;
@@ -6658,15 +6658,16 @@ function hideDragTooltip() {
   els.dragTooltip.innerHTML = "";
 }
 
-function selectRow(row, event = {}) {
+function selectRow(row, event = {}, options = {}) {
   const rowTaskIds = taskIdsForRow(row);
   if (!rowTaskIds.length) return;
+  const shouldFocusTimeline = options.focusTimeline !== false;
 
   if (event.shiftKey && state.selectionAnchorRowId) {
     const ids = taskIdsInRowRange(state.selectionAnchorRowId, row.id);
     applySelection(ids, row.id, ids.length === 1 && row.kind === "task");
     render();
-    scheduleSelectedRangeFocus(rowTaskIds, { center: true });
+    if (shouldFocusTimeline) scheduleSelectedRangeFocus(rowTaskIds, { center: true });
     return;
   }
 
@@ -6680,13 +6681,13 @@ function selectRow(row, event = {}) {
     state.selectionAnchorRowId = row.id;
     applySelection([...next], row.id, next.size === 1);
     render();
-    scheduleSelectedRangeFocus(rowTaskIds, { center: true });
+    if (shouldFocusTimeline) scheduleSelectedRangeFocus(rowTaskIds, { center: true });
     return;
   }
 
   applySelection(rowTaskIds, row.id, row.kind === "task" && rowTaskIds.length === 1);
   render();
-  scheduleSelectedRangeFocus(rowTaskIds);
+  if (shouldFocusTimeline) scheduleSelectedRangeFocus(rowTaskIds);
 }
 
 function applySelection(ids, anchorRowId = "", openEditor = false) {
