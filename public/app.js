@@ -1594,6 +1594,7 @@ function buildRows(tasks) {
         progress: projectProgress,
         health: projectHealth,
         collapsed: state.collapsedRows.has(projectId),
+        isPause: isPauseProject(project),
         leafOnly: isPauseProject(project),
         taskIds: project.tasks.map((task) => task.id),
         issue: projectIssue?.kind || "",
@@ -1613,10 +1614,11 @@ function buildRows(tasks) {
             subtitle: task.displayCount > 1 ? `${task.displayCount}개 촬영 묶음` : "",
             start: task.start,
             end: task.end,
-            color: task.color,
+            color: isWonheePauseTask(task) ? PAUSE_COLOR : task.color,
             progress: rowTasks.length > 1 ? progressForTasks(rowTasks) : progressForTask(task),
             health: rowTasks.length > 1 ? healthForTasks(rowTasks) : healthForTask(task),
             task,
+            isPause: isWonheePauseTask(task),
             taskIds: rowTasks.map((item) => item.id),
           });
         });
@@ -4001,7 +4003,7 @@ function renderBars(rows, dayWidth, criticalTaskIds) {
     const isGroupRow = row.kind === "channel" || row.kind === "project";
     const editableGroup = row.kind === "task" || isGroupRow || (row.taskIds || []).some((id) => editableTaskIds.has(id));
     const bar = document.createElement("div");
-    bar.className = `gantt-bar ${row.kind}${rowSelectionClass(row)}${row.kind === "task" && criticalTaskIds.has(row.task.id) ? " is-critical" : ""}`;
+    bar.className = `gantt-bar ${row.kind}${rowSelectionClass(row)}${row.isPause ? " is-pause" : ""}${row.kind === "task" && criticalTaskIds.has(row.task.id) ? " is-critical" : ""}`;
     if (row.issue) bar.classList.add(`is-issue-${row.issue}`);
     if (row.dependencyConflictCount) bar.classList.add("is-dependency-conflict");
     if (row.workloadRiskCount) bar.classList.add("is-workload-conflict");
@@ -4009,7 +4011,7 @@ function renderBars(rows, dayWidth, criticalTaskIds) {
     if (clippedEnd) bar.classList.add("is-clipped-end");
     if (!editableGroup) bar.classList.add("is-readonly");
     if (editableGroup && row.kind !== "task" && width < 56) bar.classList.add("is-short-group-bar");
-    bar.style.setProperty("--task-color", row.color);
+    bar.style.setProperty("--task-color", row.isPause ? PAUSE_COLOR : row.color);
     bar.style.setProperty("--progress", `${row.progress || 0}%`);
     bar.style.left = `${left}px`;
     bar.style.top = `${barTop(index, row.kind, rowHeight)}px`;
