@@ -2351,7 +2351,7 @@ function isActiveTask(task) {
 }
 
 function canonicalProjectKey(value) {
-  return cleanProjectName(value).replace(/\s+/g, "") || "새프로젝트";
+  return cleanProjectName(canonicalProjectTitle(value)).replace(/\s+/g, "") || "새프로젝트";
 }
 
 function upsertLocalProjectAlias(channel, from, to) {
@@ -2379,7 +2379,7 @@ function upsertLocalProjectAlias(channel, from, to) {
 }
 
 function resolveProjectAliasName(channel, projectName) {
-  let resolved = projectName || "새 프로젝트";
+  let resolved = canonicalProjectTitle(projectName || "새 프로젝트");
   const visited = new Set();
 
   for (let index = 0; index < 8; index += 1) {
@@ -2391,7 +2391,7 @@ function resolveProjectAliasName(channel, projectName) {
       (item) => sameChannelName(item.channel, channel) && canonicalProjectKey(item.from) === canonicalProjectKey(resolved),
     );
     if (!alias?.to || alias.to === resolved) return resolved;
-    resolved = alias.to;
+    resolved = canonicalProjectTitle(alias.to);
   }
 
   return resolved;
@@ -2662,8 +2662,25 @@ function projectCoreKey(key) {
     .trim();
 }
 
+function canonicalProjectTitle(value) {
+  const text = String(value || "").trim();
+  if (!isCanYouHandleBurnText(text)) return text;
+  const prefix = text.match(/^\s*(\[[^\]]+\]\s*)/)?.[1] || "";
+  const episode = canYouHandleEpisode(text);
+  return `${prefix}캔유 핸들 더 번${episode ? ` EP.${episode}` : ""}`.trim();
+}
+
+function isCanYouHandleBurnText(value) {
+  return /캔\s*유\s*핸들\s*더\s*(힛|히트|번)|can\s*you\s*handle\s*the\s*(heat|hit|burn)/i.test(String(value || ""));
+}
+
+function canYouHandleEpisode(value) {
+  const text = String(value || "");
+  return text.match(/\bep\.?\s*(\d+)/i)?.[1] || text.match(/(\d+)\s*화/)?.[1] || "";
+}
+
 function cleanProjectName(value) {
-  return String(value || "")
+  return canonicalProjectTitle(value)
     .normalize("NFKC")
     .toLowerCase()
     .replace(/\[[^\]]*\]/g, " ")
@@ -2695,7 +2712,7 @@ function displayProjectName(tasks, fallback) {
 }
 
 function cleanDisplayProjectName(value) {
-  return String(value || "")
+  return canonicalProjectTitle(value)
     .replace(/\s+/g, " ")
     .replace(/\s*(업로드|릴리즈|게시|발행|촬영|편집|가편\s*공유)$/g, "")
     .trim();
@@ -10706,9 +10723,9 @@ function embedKeyFromLocation() {
 
 function taskPatch(task) {
   return {
-    title: task.title,
+    title: canonicalProjectTitle(task.title),
     channel: task.channel,
-    project: task.project,
+    project: canonicalProjectTitle(task.project),
     detail: task.detail,
     description: task.description || "",
     start: task.start,

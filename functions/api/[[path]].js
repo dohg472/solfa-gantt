@@ -1151,14 +1151,16 @@ function embedKeyFromReferer(request) {
 function normalizeTask(task) {
   const start = toDateOnly(task.start) || todayString();
   const end = toDateOnly(task.end) || start;
+  const title = canonicalProjectTitle(String(task.title || task.project || "새 프로젝트").trim());
+  const project = canonicalProjectTitle(String(task.project || task.title || "새 프로젝트").trim());
   return {
     id: String(task.id || crypto.randomUUID()),
     originId: String(task.originId || ""),
     source: task.source || "target",
     syncMode: task.syncMode || "target",
-    title: String(task.title || task.project || "새 프로젝트").trim(),
+    title,
     channel: String(task.channel || "미지정 채널").trim(),
-    project: String(task.project || task.title || "새 프로젝트").trim(),
+    project,
     detail: String(task.detail || task.category || "상세일정").trim(),
     category: String(task.category || task.detail || "").trim(),
     rowType: String(task.rowType || "").trim(),
@@ -1177,10 +1179,12 @@ function normalizeTask(task) {
 
 function normalizeTaskPatch(body) {
   const patch = body && typeof body === "object" ? body : {};
+  const title = canonicalProjectTitle(String(patch.title || patch.project || "새 프로젝트").trim());
+  const project = canonicalProjectTitle(String(patch.project || patch.title || "새 프로젝트").trim());
   return {
-    title: String(patch.title || patch.project || "새 프로젝트").trim(),
+    title,
     channel: String(patch.channel || "미지정 채널").trim(),
-    project: String(patch.project || patch.title || "새 프로젝트").trim(),
+    project,
     detail: String(patch.detail || "상세일정").trim(),
     description: String(patch.description || "").trim(),
     start: toDateOnly(patch.start) || todayString(),
@@ -1313,7 +1317,24 @@ function projectCoreKey(value) {
 }
 
 function resolveProjectAlias(channel, project) {
-  return project;
+  return canonicalProjectTitle(project);
+}
+
+function canonicalProjectTitle(value) {
+  const text = String(value || "").trim();
+  if (!isCanYouHandleBurnText(text)) return text;
+  const prefix = text.match(/^\s*(\[[^\]]+\]\s*)/)?.[1] || "";
+  const episode = canYouHandleEpisode(text);
+  return `${prefix}캔유 핸들 더 번${episode ? ` EP.${episode}` : ""}`.trim();
+}
+
+function isCanYouHandleBurnText(value) {
+  return /캔\s*유\s*핸들\s*더\s*(힛|히트|번)|can\s*you\s*handle\s*the\s*(heat|hit|burn)/i.test(String(value || ""));
+}
+
+function canYouHandleEpisode(value) {
+  const text = String(value || "");
+  return text.match(/\bep\.?\s*(\d+)/i)?.[1] || text.match(/(\d+)\s*화/)?.[1] || "";
 }
 
 function isAutoHiddenTask(task) {
@@ -1434,7 +1455,7 @@ function normalizeChannelName(value) {
 }
 
 function normalizeProjectName(value) {
-  return String(value || "")
+  return canonicalProjectTitle(value)
     .normalize("NFKC")
     .toLowerCase()
     .replace(/\[[^\]]*\]/g, " ")
