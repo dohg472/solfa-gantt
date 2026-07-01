@@ -1370,6 +1370,7 @@ function buildRows(tasks) {
           return {
             ...project,
             tasks: visibleTasks,
+            displayTasks: displayTasksForProject(visibleTasks),
             name: project.aliasName || displayProjectName(project.tasks, project.name),
             range: rangeOf(visibleTasks),
           };
@@ -1444,12 +1445,13 @@ function buildRows(tasks) {
       const projectHealth = healthForTasks(project.tasks);
       const projectStatus = projectVisibilityState(project.tasks);
       const projectRange = groupRangeForRow({ id: projectId, kind: "project" }, project.range);
+      const projectDisplayTasks = project.displayTasks || project.tasks;
       rows.push({
         id: projectId,
         kind: "project",
         channel: channel.name,
         title: project.name,
-        subtitle: projectSubtitle(project.tasks, projectProgress, projectIssue),
+        subtitle: projectSubtitle(projectDisplayTasks, projectProgress, projectIssue),
         statusReason: projectIssue?.reason || "",
         start: projectRange.start,
         end: projectRange.end,
@@ -1463,21 +1465,23 @@ function buildRows(tasks) {
 
       if (state.collapsedRows.has(projectId)) continue;
 
-      project.tasks
+      (project.displayTasks || project.tasks)
         .slice()
         .sort((a, b) => compareDate(a.start, b.start) || compareDate(a.end, b.end) || compareText(a.detail, b.detail))
         .forEach((task) => {
+          const rowTasks = displayRowTasks(task);
           rows.push({
             id: task.id,
             kind: "task",
             title: task.detail || task.title,
-            subtitle: "",
+            subtitle: task.displayCount > 1 ? `${task.displayCount}개 촬영 묶음` : "",
             start: task.start,
             end: task.end,
             color: task.color,
-            progress: progressForTask(task),
-            health: healthForTask(task),
+            progress: rowTasks.length > 1 ? progressForTasks(rowTasks) : progressForTask(task),
+            health: rowTasks.length > 1 ? healthForTasks(rowTasks) : healthForTask(task),
             task,
+            taskIds: rowTasks.map((item) => item.id),
           });
         });
     }
@@ -1493,6 +1497,49 @@ function projectSubtitle(tasks, progress, issue) {
     return [issue.reason, composition, count].filter(Boolean).join(" · ");
   }
   return [count, composition].filter(Boolean).join(" · ");
+}
+
+function displayTasksForProject(tasks) {
+  const result = [];
+  const shootRows = new Map();
+
+  for (const task of tasks || []) {
+    if (!isShootTask(task)) {
+      result.push(task);
+      continue;
+    }
+
+    const key = [task.start, task.end, normalizePresetText(task.detail || task.category || "촬영")].join("|");
+    const existing = shootRows.get(key);
+    if (!existing) {
+      const row = { ...task, displayTasks: [task], displayCount: 1 };
+      shootRows.set(key, row);
+      result.push(row);
+      continue;
+    }
+
+    existing.displayTasks.push(task);
+    existing.displayCount = existing.displayTasks.length;
+    existing.assignee = mergeDisplayLabels(existing.displayTasks.map((item) => item.assignee));
+  }
+
+  return result;
+}
+
+function displayRowTasks(task) {
+  return Array.isArray(task?.displayTasks) && task.displayTasks.length ? task.displayTasks : task ? [task] : [];
+}
+
+function mergeDisplayLabels(values) {
+  return [...new Set((values || []).flatMap((value) => String(value || "").split(",")).map((value) => value.trim()).filter(Boolean))].join(", ");
+}
+
+function isShootTask(task) {
+  if (!task || isUploadTask(task)) return false;
+  const detailText = [task.detail, task.category].filter(Boolean).join(" ");
+  const fullText = [detailText, task.title].filter(Boolean).join(" ");
+  if (/(업로드|릴리즈|게시|발행|upload|release)/i.test(detailText)) return false;
+  return /(촬영|재촬영|shoot)/i.test(fullText);
 }
 
 function hiddenStubMatchesCurrentView(stub) {
@@ -3466,6 +3513,14 @@ async function saveInlineRange(row, nextStart, nextEnd) {
     return;
   }
 
+  const rowTaskIds = taskIdsForRow(row);
+  if (row.kind === "task" && rowTaskIds.length > 1) {
+    const originals = tasksForIds(rowTaskIds);
+    const nextTasks = originals.map((task) => ({ ...task, start: nextStart, end: nextEnd }));
+    await applyBulkTaskUpdates(nextTasks, `"${row.title}" 묶음 기간 수정`, { rescheduleMode: rangeRescheduleMode(row.task, { ...row.task, start: nextStart, end: nextEnd }) });
+    return;
+  }
+
   if (row.kind === "task" && row.task) {
     const next = { ...row.task, start: nextStart, end: nextEnd };
     await applyBulkTaskUpdates([next], `"${row.title}" 기간 수정`, { rescheduleMode: rangeRescheduleMode(row.task, next) });
@@ -3706,12 +3761,12 @@ function renderBars(rows, dayWidth, criticalTaskIds) {
       bar.addEventListener("pointerdown", (event) => {
         if (isSelectionModifier(event)) return;
         if (event.button !== 0 || event.target.dataset.mode) return;
-        startDrag(event, row.task.id, "move");
+        startDrag(event, row.task.id, "move", taskIdsForRow(row));
       });
       bar.querySelectorAll("[data-mode]").forEach((target) => {
         target.addEventListener("pointerdown", (event) => {
           if (isSelectionModifier(event)) return;
-          startDrag(event, row.task.id, target.dataset.mode);
+          startDrag(event, row.task.id, target.dataset.mode, taskIdsForRow(row));
         });
       });
       bar.querySelectorAll("[data-dependency-side]").forEach((target) => {
@@ -3779,7 +3834,7 @@ function baselineTaskMap() {
 
 function baselineRangeForRow(row, baselineMap, taskById) {
   if (!baselineMap.size) return null;
-  if (row.kind === "task") return baselineForTask(row.task, baselineMap);
+  if (row.kind === "task" && !(row.taskIds || []).length) return baselineForTask(row.task, baselineMap);
   const matches = (row.taskIds || [])
     .map((id) => taskById.get(id) || taskById.get(normalizeId(id)) || { id })
     .map((task) => baselineForTask(task, baselineMap))
@@ -4155,7 +4210,7 @@ function openTimelineContext(event) {
 }
 
 function openTaskContext(event, taskId, date = "") {
-  const row = state.rows.find((item) => item.kind === "task" && item.task?.id === taskId);
+  const row = state.rows.find((item) => item.kind === "task" && (item.id === taskId || item.task?.id === taskId || (item.taskIds || []).includes(taskId)));
   if (row) openRowContext(event, row, date);
 }
 
@@ -4173,7 +4228,7 @@ function openRowContext(event, row, date = "") {
   }
 
   state.context = {
-    taskId: !useSelection && row.kind === "task" ? row.task.id : "",
+    taskId: !useSelection && row.kind === "task" && taskIds.length === 1 ? row.task.id : "",
     taskIds,
     kind: useSelection ? "selection" : row.kind,
     channel: row.channel || row.task?.channel || "",
@@ -4186,7 +4241,7 @@ function openRowContext(event, row, date = "") {
   showContextMenu(event.clientX, event.clientY, {
     summary: contextSummary(state.context),
     canCreate: !useSelection && Boolean(date),
-    canEdit: !useSelection && row.kind === "task",
+    canEdit: !useSelection && row.kind === "task" && taskIds.length === 1,
     canRename: !useSelection && ["channel", "project"].includes(row.kind) && !row.hiddenOnly,
     canMerge: canMergeContextProjects(useSelection ? "selection" : row.kind, taskIds),
     canDone: tasksForIds(taskIds).some((task) => !isDoneTask(task)),
@@ -5876,16 +5931,20 @@ function taskIdAliases(task) {
     .filter(Boolean);
 }
 
-function startDrag(event, taskId, mode) {
+function startDrag(event, taskId, mode, rowTaskIds = []) {
   if (event.button !== 0) return;
   event.preventDefault();
   event.stopPropagation();
   const task = state.tasks.find((item) => item.id === taskId);
   if (!task) return;
 
-  const dragIds = state.selectedIds.size > 1 && state.selectedIds.has(taskId) ? new Set(state.selectedIds) : new Set([taskId]);
+  const rowIds = new Set((rowTaskIds || []).filter((id) => state.tasks.some((item) => item.id === id)));
+  if (!rowIds.size) rowIds.add(taskId);
+  const dragIds = state.selectedIds.size > 1 && [...rowIds].some((id) => state.selectedIds.has(id)) ? new Set(state.selectedIds) : rowIds;
   if (dragIds.size === 1) {
     applySelection([taskId], taskId, true);
+  } else {
+    applySelection([...dragIds], rowIdForTaskId(taskId) || taskId, false);
   }
 
   event.currentTarget.setPointerCapture(event.pointerId);
@@ -6343,7 +6402,7 @@ function applySelection(ids, anchorRowId = "", openEditor = false) {
 
 function taskIdsForRow(row) {
   if (!row) return [];
-  if (row.kind === "task") return [row.task.id];
+  if (row.kind === "task") return [...new Set(row.taskIds?.length ? row.taskIds : [row.task?.id].filter(Boolean))];
   return [...new Set(row.taskIds || [])];
 }
 
@@ -6361,7 +6420,7 @@ function tasksForIds(ids) {
 }
 
 function rowIdForTaskId(taskId) {
-  return state.rows.find((row) => row.kind === "task" && row.task?.id === taskId)?.id || "";
+  return state.rows.find((row) => row.kind === "task" && (row.task?.id === taskId || (row.taskIds || []).includes(taskId)))?.id || "";
 }
 
 function taskIdsInRowRange(fromRowId, toRowId) {

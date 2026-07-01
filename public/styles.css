@@ -659,8 +659,8 @@ body.is-table-resizing * {
 }
 
 .group-row.project.is-issue-upload-only {
-  background: #fff0ee;
-  box-shadow: inset 4px 0 0 #d84e4e;
+  background: #fff5e7;
+  box-shadow: inset 4px 0 0 #d8842f;
 }
 
 .group-row.project.is-issue-missing-upload {
@@ -861,7 +861,7 @@ body.is-table-resizing * {
 }
 
 .group-row.project.is-issue-upload-only .task-meta {
-  color: #a83b3b;
+  color: #9a5b16;
   font-weight: 780;
 }
 
@@ -1033,7 +1033,7 @@ body[data-density="compact"] .task-meta {
 }
 
 .timeline-navigator-bar.is-issue-upload-only {
-  background: #d84e4e;
+  background: #d8842f;
 }
 
 .timeline-navigator-bar.is-issue-missing-upload {
@@ -1231,8 +1231,8 @@ body.is-navigator-dragging .timeline-navigator-window {
 }
 
 .gantt-bar.project.is-issue-upload-only {
-  background: #d84e4e;
-  box-shadow: 0 2px 8px rgba(216, 78, 78, 0.24);
+  background: #d8842f;
+  box-shadow: 0 2px 8px rgba(216, 132, 47, 0.22);
 }
 
 .gantt-bar.project.is-issue-missing-upload {
