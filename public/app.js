@@ -185,6 +185,7 @@ const els = {
   hiddenManagerButton: document.getElementById("hiddenManagerButton"),
   activityButton: document.getElementById("activityButton"),
   operationButton: document.getElementById("operationButton"),
+  changeRequestButton: document.getElementById("changeRequestButton"),
   undoButton: document.getElementById("undoButton"),
   redoButton: document.getElementById("redoButton"),
   closeEditorButton: document.getElementById("closeEditorButton"),
@@ -406,6 +407,7 @@ function bindEvents() {
   els.hiddenManagerButton.addEventListener("click", openHiddenPanel);
   els.activityButton.addEventListener("click", openActivityPanel);
   els.operationButton.addEventListener("click", openOperationPanel);
+  els.changeRequestButton?.addEventListener("click", openChangeRequestModal);
   els.statusBannerButton.addEventListener("click", openStatusBannerPanel);
   els.opsSummary.addEventListener("click", handleOpsSummaryClick);
   els.undoButton.addEventListener("click", runUndo);
@@ -5743,6 +5745,77 @@ function resolveInputModal(values, silent = false) {
   els.inputBadge.textContent = "입력";
   els.inputConfirmButton.textContent = "저장";
   if (!silent && resolve) resolve(values);
+}
+
+async function openChangeRequestModal() {
+  const input = await openInputModal({
+    badge: "요청",
+    title: "수정요청",
+    summary: "필요한 내용만 짧게 적어주세요. 현재 화면과 선택 항목은 자동으로 같이 저장됩니다.",
+    confirmText: "요청 저장",
+    fields: [
+      {
+        name: "message",
+        label: "수정요청사항",
+        type: "textarea",
+        placeholder: "예: 휴재처럼 특정 항목은 다른 색으로 보이게 해주세요.",
+      },
+    ],
+  });
+  if (!input?.message) return;
+
+  try {
+    const response = await fetch(apiUrl("/api/change-requests"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        message: input.message,
+        context: changeRequestContext(),
+      }),
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || "수정요청을 저장하지 못했습니다.");
+    showToast("수정요청을 저장했습니다. 승인 전에는 자동으로 반영되지 않습니다.");
+  } catch (error) {
+    showToast(error.message);
+  }
+}
+
+function changeRequestContext() {
+  const dayWidth = ZOOM[state.zoom]?.dayWidth || 22;
+  const visibleStartOffset = Math.max(0, Math.floor((els.ganttScroll?.scrollLeft || 0) / dayWidth));
+  const visibleDayCount = Math.max(1, Math.ceil((els.ganttScroll?.clientWidth || 0) / dayWidth));
+  const selected = selectedTasks().slice(0, 12).map((task) => ({
+    id: task.id,
+    channel: task.channel,
+    project: task.project,
+    detail: task.detail || task.category,
+    title: task.title,
+    start: task.start,
+    end: task.end,
+    status: task.status,
+  }));
+  return {
+    url: window.location.href,
+    search: state.search || "",
+    filters: { ...state.filters },
+    view: {
+      zoom: state.zoom,
+      density: state.density,
+      showCompleted: state.showCompleted,
+      rangeStart: state.rangeStart,
+      rangeEnd: state.rangeEnd,
+      visibleStart: state.rangeStart ? shiftDate(state.rangeStart, visibleStartOffset) : "",
+      visibleEnd: state.rangeStart ? shiftDate(state.rangeStart, visibleStartOffset + visibleDayCount) : "",
+      scrollLeft: Math.round(els.ganttScroll?.scrollLeft || 0),
+      scrollTop: Math.round(els.ganttScroll?.scrollTop || 0),
+    },
+    selection: {
+      count: selectedTaskIds().length,
+      tasks: selected,
+    },
+    createdFrom: "gantt",
+  };
 }
 
 function impactPreviewMarkup(cascaded) {

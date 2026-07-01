@@ -116,6 +116,23 @@ async function route({ request, env }) {
     return json(await deleteReviewIgnore(env, await readJson(request)));
   }
 
+  if (path === "/change-requests" && request.method === "GET") {
+    return json(await listChangeRequests(env, url));
+  }
+
+  if (path === "/change-requests" && request.method === "POST") {
+    return json(await saveChangeRequest(env, await readJson(request)), 201);
+  }
+
+  const changeRequestMatch = path.match(/^\/change-requests\/(.+)$/);
+  if (changeRequestMatch && request.method === "PATCH") {
+    return json(await updateChangeRequest(env, decodeURIComponent(changeRequestMatch[1]), await readJson(request)));
+  }
+
+  if (changeRequestMatch && request.method === "DELETE") {
+    return json(await deleteChangeRequest(env, decodeURIComponent(changeRequestMatch[1])));
+  }
+
   if (path === "/hidden" && request.method === "GET") {
     return json(await getHiddenState(env));
   }
@@ -468,6 +485,115 @@ async function deleteReviewIgnore(env, body) {
   return { deleted: true };
 }
 
+async function listChangeRequests(env, url) {
+  const store = await readStore(env);
+  const status = String(url.searchParams.get("status") || "").trim();
+  const limit = Math.min(Math.max(Number(url.searchParams.get("limit") || 100), 1), 200);
+  const requests = (store.changeRequests || [])
+    .filter((item) => !status || item.status === status)
+    .slice(0, limit);
+  return {
+    requests,
+    counts: changeRequestCounts(store.changeRequests || []),
+  };
+}
+
+async function saveChangeRequest(env, body) {
+  const message = String(body?.message || body?.request || "").trim();
+  if (!message) throw httpError(400, "수정요청 내용을 입력해주세요.");
+  const now = new Date().toISOString();
+  const item = {
+    id: crypto.randomUUID(),
+    status: "대기",
+    message: message.slice(0, 3000),
+    context: sanitizeChangeRequestContext(body?.context),
+    createdAt: now,
+    updatedAt: now,
+  };
+  const nextStore = await mutateStore(env, (store) => {
+    store.changeRequests = [item, ...(store.changeRequests || [])].slice(0, 300);
+    addActivity(store, {
+      type: "request",
+      title: "수정요청 접수",
+      message: item.message.slice(0, 160),
+      count: 1,
+    });
+  });
+  return {
+    request: item,
+    counts: changeRequestCounts(nextStore.changeRequests || []),
+  };
+}
+
+async function updateChangeRequest(env, id, body) {
+  const allowedStatuses = new Set(["대기", "검토중", "승인대기", "승인됨", "진행중", "완료", "보류"]);
+  const status = String(body?.status || "").trim();
+  const note = String(body?.note || "").trim().slice(0, 2000);
+  const nextStore = await mutateStore(env, (store) => {
+    store.changeRequests = (store.changeRequests || []).map((item) => {
+      if (item.id !== id) return item;
+      return {
+        ...item,
+        status: allowedStatuses.has(status) ? status : item.status,
+        note: note || item.note || "",
+        updatedAt: new Date().toISOString(),
+      };
+    });
+  });
+  const request = (nextStore.changeRequests || []).find((item) => item.id === id);
+  if (!request) throw httpError(404, "수정요청을 찾지 못했습니다.");
+  return { request, counts: changeRequestCounts(nextStore.changeRequests || []) };
+}
+
+async function deleteChangeRequest(env, id) {
+  let deleted = false;
+  const nextStore = await mutateStore(env, (store) => {
+    const before = (store.changeRequests || []).length;
+    store.changeRequests = (store.changeRequests || []).filter((item) => item.id !== id);
+    deleted = store.changeRequests.length !== before;
+  });
+  if (!deleted) throw httpError(404, "수정요청을 찾지 못했습니다.");
+  return { deleted: true, counts: changeRequestCounts(nextStore.changeRequests || []) };
+}
+
+function sanitizeChangeRequestContext(context) {
+  if (!context || typeof context !== "object") return {};
+  return {
+    url: String(context.url || "").slice(0, 500),
+    search: String(context.search || "").slice(0, 200),
+    filters: context.filters && typeof context.filters === "object" ? context.filters : {},
+    view: context.view && typeof context.view === "object" ? context.view : {},
+    selection: sanitizeChangeRequestSelection(context.selection),
+    createdFrom: String(context.createdFrom || "gantt").slice(0, 80),
+  };
+}
+
+function sanitizeChangeRequestSelection(selection) {
+  const tasks = Array.isArray(selection?.tasks) ? selection.tasks : [];
+  return {
+    count: Number(selection?.count || tasks.length) || 0,
+    tasks: tasks.slice(0, 20).map((task) => ({
+      id: String(task?.id || "").slice(0, 120),
+      channel: String(task?.channel || "").slice(0, 120),
+      project: String(task?.project || "").slice(0, 220),
+      detail: String(task?.detail || "").slice(0, 120),
+      title: String(task?.title || "").slice(0, 220),
+      start: toDateOnly(task?.start),
+      end: toDateOnly(task?.end),
+      status: String(task?.status || "").slice(0, 80),
+    })),
+  };
+}
+
+function changeRequestCounts(requests) {
+  return (requests || []).reduce((counts, item) => {
+    const status = item.status || "대기";
+    counts.total += 1;
+    counts[status] = (counts[status] || 0) + 1;
+    return counts;
+  }, { total: 0 });
+}
+
 async function getHiddenState(env) {
   const store = await readStore(env);
   return {
@@ -551,6 +677,8 @@ function diagnosticsFor(tasks, sourceCount, targetCount, store) {
     nonDeliverableExcludedTasks: 0,
     projectAliases: (store.projectAliases || []).length,
     reviewIgnores: (store.reviewIgnores || []).length,
+    changeRequests: (store.changeRequests || []).length,
+    pendingChangeRequests: (store.changeRequests || []).filter((item) => item.status === "대기").length,
     kvMissing: Boolean(store.kvMissing),
     autoExcludedTasks: 0,
     mappedCopies: Object.keys(store.writeMap || {}).length,
@@ -895,6 +1023,7 @@ function normalizeStore(store = {}) {
     hiddenProjects: Array.isArray(store.hiddenProjects) ? store.hiddenProjects : [],
     projectAliases: Array.isArray(store.projectAliases) ? store.projectAliases : [],
     reviewIgnores: Array.isArray(store.reviewIgnores) ? store.reviewIgnores : [],
+    changeRequests: Array.isArray(store.changeRequests) ? store.changeRequests.slice(0, 300) : [],
     kvMissing: Boolean(store.kvMissing),
     writeMap: store.writeMap && typeof store.writeMap === "object" ? store.writeMap : {},
     viewSettings: store.viewSettings && typeof store.viewSettings === "object" ? store.viewSettings : null,
