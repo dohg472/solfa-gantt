@@ -29,7 +29,7 @@ const EMBED_KEY = embedKeyFromLocation();
 const SYNC_CHANNEL_NAME = "solpa-gantt-sync";
 const VIEW_PREFS_KEY = "solpa-gantt-view";
 const REVIEW_PANEL_PREFS_KEY = "solpa-gantt-review-panel";
-const SYNC_STATUS_INTERVAL_MS = 60000;
+const SYNC_STATUS_INTERVAL_MS = 15000;
 const FULL_SYNC_INTERVAL_MS = 300000;
 const DEFAULT_COLLAPSED_REVIEW_SECTIONS = ["upload-only", "missing-upload", "completed"];
 const STALE_REVIEW_BACKLOG_DAYS = 14;
@@ -113,6 +113,7 @@ const state = {
   syncTimer: null,
   syncStatusTimer: null,
   autoSyncTimer: null,
+  pendingSyncForce: false,
   ganttScrollFrame: null,
   renderedScrollLeft: 0,
   isLoading: false,
@@ -755,7 +756,8 @@ async function saveSharedViewPrefs(payload) {
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || "보기 설정을 저장하지 못했습니다.");
     state.viewSettingsLoaded = true;
-    state.viewSettingsUpdatedAt = result.viewSettings?.updatedAt || state.viewSettingsUpdatedAt;
+    state.viewSettingsUpdatedAt = result.viewSettings?.updatedAt || payload.updatedAt || state.viewSettingsUpdatedAt;
+    notifyDataChanged("view-settings", { forceRefresh: false });
   } catch (error) {
     console.warn(error);
   }
@@ -841,13 +843,13 @@ function handleServerSyncSnapshot(event) {
 function handleServerSyncEvent(event) {
   const payload = parseServerSyncEvent(event);
   if (!payload?.version) {
-    requestSyncRefresh("server-event", 150);
+    requestSyncRefresh("server-event", 150, { force: true });
     return;
   }
   if (state.syncVersion && payload.version === state.syncVersion) return;
   state.syncVersion = payload.version;
   state.syncChangedAt = payload.changedAt || state.syncChangedAt;
-  requestSyncRefresh(payload.reason || "server-event", 150);
+  requestSyncRefresh(payload.reason || "server-event", 150, { force: true });
 }
 
 function parseServerSyncEvent(event) {
@@ -860,14 +862,15 @@ function parseServerSyncEvent(event) {
 
 function handleSyncMessage(message) {
   if (!message || message.clientId === state.syncClientId || message.type !== "changed") return;
-  requestSyncRefresh("remote", 400);
+  requestSyncRefresh("remote", 250, { force: message.forceRefresh !== false });
 }
 
-function notifyDataChanged(reason = "changed") {
+function notifyDataChanged(reason = "changed", options = {}) {
   const message = {
     type: "changed",
     reason,
     clientId: state.syncClientId,
+    forceRefresh: options.forceRefresh !== false,
     at: new Date().toISOString(),
   };
   try {
@@ -882,16 +885,24 @@ function notifyDataChanged(reason = "changed") {
   }
 }
 
-function requestSyncRefresh(reason = "sync", delay = 1200) {
+function requestSyncRefresh(reason = "sync", delay = 1200, options = {}) {
   state.pendingSyncReason = reason;
+  state.pendingSyncForce = Boolean(state.pendingSyncForce || options.force);
   window.clearTimeout(state.syncTimer);
   state.syncTimer = window.setTimeout(() => {
     if (isAutoSyncBusy()) {
-      requestSyncRefresh(reason, 5000);
+      requestSyncRefresh(reason, 5000, { force: state.pendingSyncForce });
       return;
     }
-    loadTasks({ silent: true, preserveScroll: true, reason });
+    const force = Boolean(state.pendingSyncForce);
+    state.pendingSyncForce = false;
+    loadTasks({ silent: true, preserveScroll: true, force, reason });
   }, delay);
+}
+
+function refreshAfterLocalMutation(reason = "changed", delay = 800) {
+  notifyDataChanged(reason, { forceRefresh: true });
+  requestSyncRefresh(reason, delay, { force: true });
 }
 
 async function checkSyncStatus() {
@@ -919,7 +930,7 @@ async function checkSyncStatus() {
     if (status.version !== state.syncVersion) {
       state.syncVersion = status.version;
       state.syncChangedAt = status.changedAt || "";
-      requestSyncRefresh("server-version", 100);
+      requestSyncRefresh("server-version", 100, { force: true });
     }
   } catch {
     // The regular full refresh path will surface connection errors when needed.
@@ -7187,6 +7198,7 @@ async function applyBulkTaskUpdates(nextTasks, label, options = {}) {
       () => restoreTaskSnapshots(redoSnapshots),
     );
     render();
+    refreshAfterLocalMutation("task-save");
     showToast(`${label}${cascadeLabel} 완료했습니다.`);
   } catch (error) {
     state.tasks = previousTasks;
@@ -9760,8 +9772,8 @@ async function createTask(seed) {
       notifyDataChanged("undo-create");
       await loadTasks();
     });
-    notifyDataChanged("create-task");
     render();
+    refreshAfterLocalMutation("create-task");
     showToast("간트_확인에 상세일정을 만들었습니다.");
   } catch (error) {
     showToast(error.message);
@@ -9854,7 +9866,21 @@ function taskPatch(task) {
 
 function mergeSavedTask(id, saved) {
   const previous = state.tasks.find((task) => task.id === id) || {};
-  replaceTask({ ...previous, ...saved, id });
+  const nextId = saved?.id || id;
+  const merged = { ...previous, ...saved, id: nextId };
+  let didReplace = false;
+  state.tasks = state.tasks.map((task) => {
+    if (task.id !== id && task.id !== nextId) return task;
+    didReplace = true;
+    return { ...task, ...merged };
+  });
+  if (!didReplace) state.tasks.push(merged);
+  if (state.selectedId === id) state.selectedId = nextId;
+  if (state.selectedIds.has(id)) {
+    state.selectedIds.delete(id);
+    state.selectedIds.add(nextId);
+  }
+  if (state.selectionAnchorRowId === id) state.selectionAnchorRowId = nextId;
 }
 
 function replaceTask(nextTask) {

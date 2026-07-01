@@ -460,10 +460,10 @@ async function restoreHiddenItem(env, body) {
 
 async function saveViewSettings(env, body) {
   const settings = body && typeof body === "object" ? body : {};
-  await mutateStore(env, (store) => {
+  const nextStore = await mutateStore(env, (store) => {
     store.viewSettings = { ...settings, updatedAt: new Date().toISOString() };
   });
-  return { saved: true, viewSettings: settings };
+  return { saved: true, viewSettings: nextStore.viewSettings };
 }
 
 async function saveBaseline(env, body) {
