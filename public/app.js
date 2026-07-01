@@ -81,6 +81,8 @@ const state = {
   createDrag: null,
   tableResizeDrag: null,
   timelineNavigatorDrag: null,
+  panMode: false,
+  panDrag: null,
   suppressClick: false,
   context: null,
   collapsedRows: new Set(),
@@ -151,6 +153,7 @@ const els = {
   timelineNavigator: document.getElementById("timelineNavigator"),
   timelineNavigatorTrack: document.getElementById("timelineNavigatorTrack"),
   timelineNavigatorWindow: document.getElementById("timelineNavigatorWindow"),
+  panModeButton: document.getElementById("panModeButton"),
   gridLayer: document.getElementById("gridLayer"),
   todayLine: document.getElementById("todayLine"),
   dependencyLayer: document.getElementById("dependencyLayer"),
@@ -382,6 +385,7 @@ function bindEvents() {
     saveViewPrefs();
     render();
   });
+  els.panModeButton.addEventListener("click", togglePanMode);
   els.filterButton.addEventListener("click", openFilterPanel);
   els.closeFilterPanelButton.addEventListener("click", closeFilterPanel);
   els.filterPanelBackdrop.addEventListener("click", closeFilterPanel);
@@ -469,6 +473,7 @@ function bindEvents() {
   els.taskTable.addEventListener("pointerdown", (event) => startSelectionDrag(event, "table"));
   els.tableResizeHandle.addEventListener("pointerdown", startTableResize);
   els.tableResizeHandle.addEventListener("dblclick", resetTableWidth);
+  els.ganttScroll.addEventListener("pointerdown", startPanDrag, { capture: true });
   els.ganttScroll.addEventListener("scroll", handleGanttScroll);
   els.ganttScroll.addEventListener("wheel", handleGanttWheel, { passive: false });
   els.timelineNavigatorTrack?.addEventListener("pointerdown", startTimelineNavigatorJump);
@@ -517,6 +522,10 @@ function bindEvents() {
     }
     if (handleKeyboardScheduleNudge(event)) return;
     if (event.key === "Escape") {
+      if (state.panMode) {
+        setPanMode(false);
+        return;
+      }
       if (!els.inputModal.hidden) {
         resolveInputModal(null);
         return;
@@ -561,7 +570,7 @@ function handleKeyboardScheduleNudge(event) {
 
 function keyboardNudgeBlocked(event) {
   if (!selectedTaskIds().length) return true;
-  if (state.drag || state.dependencyDrag || state.selectionDrag || state.createDrag || state.timelineNavigatorDrag) return true;
+  if (state.drag || state.dependencyDrag || state.selectionDrag || state.createDrag || state.timelineNavigatorDrag || state.panDrag) return true;
   if (!els.inputModal.hidden || !els.impactModal.hidden) return true;
   if (!els.contextMenu.hidden) return true;
   if (document.querySelector(".range-popover") || document.querySelector(".meta-popover")) return true;
@@ -777,6 +786,9 @@ async function saveSharedViewPrefs(payload) {
 
 function syncViewControls() {
   document.querySelectorAll("[data-zoom]").forEach((item) => item.classList.toggle("is-active", item.dataset.zoom === state.zoom));
+  els.panModeButton?.classList.toggle("is-active", state.panMode);
+  els.panModeButton?.setAttribute("aria-pressed", String(state.panMode));
+  document.body.classList.toggle("is-pan-mode", state.panMode);
   els.densityButton.classList.toggle("is-active", state.density === "compact");
   els.densityButton.textContent = state.density === "compact" ? "촘촘" : "넓게";
   els.dependencyToggleButton.classList.toggle("is-active", state.showDependencies);
@@ -787,6 +799,17 @@ function syncViewControls() {
   els.baselineToggleButton.title = state.baseline?.exists ? `${state.baseline.taskCount}개 일정 기준선 표시` : "운영 패널에서 기준선을 먼저 저장하세요";
   els.completedToggleButton.classList.toggle("is-active", state.showCompleted);
   renderSearchControls();
+}
+
+function togglePanMode() {
+  setPanMode(!state.panMode);
+}
+
+function setPanMode(enabled) {
+  state.panMode = Boolean(enabled);
+  if (!state.panMode) state.panDrag = null;
+  syncViewControls();
+  showToast(state.panMode ? "이동 모드: 차트를 잡고 드래그하면 화면이 움직입니다." : "이동 모드를 껐습니다.");
 }
 
 function renderSearchControls() {
@@ -1091,7 +1114,7 @@ function handleGanttScroll() {
   state.ganttScrollFrame = window.requestAnimationFrame(() => {
     state.ganttScrollFrame = null;
     if (Math.round(els.ganttScroll.scrollLeft || 0) === state.renderedScrollLeft) return;
-    if (state.isLoading || state.drag || state.selectionDrag || state.createDrag || state.tableResizeDrag || state.timelineNavigatorDrag) return;
+    if (state.isLoading || state.drag || state.selectionDrag || state.createDrag || state.tableResizeDrag || state.timelineNavigatorDrag || state.panDrag) return;
     render();
   });
 }
@@ -1200,6 +1223,45 @@ function handleGanttWheel(event) {
     event.preventDefault();
     els.ganttScroll.scrollLeft += event.deltaY;
   }
+}
+
+function startPanDrag(event) {
+  if (!state.panMode || event.button !== 0) return;
+  if (state.drag || state.dependencyDrag || state.selectionDrag || state.createDrag || state.tableResizeDrag || state.timelineNavigatorDrag) return;
+  if (event.target?.closest?.("input, textarea, select, [contenteditable='true']")) return;
+  event.preventDefault();
+  event.stopPropagation();
+  event.stopImmediatePropagation?.();
+
+  state.panDrag = {
+    startX: event.clientX,
+    startY: event.clientY,
+    startScrollLeft: els.ganttScroll.scrollLeft,
+    startScrollTop: els.ganttScroll.scrollTop,
+  };
+  els.ganttScroll.setPointerCapture?.(event.pointerId);
+  document.body.classList.add("is-panning");
+  window.addEventListener("pointermove", movePanDrag);
+  window.addEventListener("pointerup", endPanDrag, { once: true });
+  window.addEventListener("pointercancel", endPanDrag, { once: true });
+}
+
+function movePanDrag(event) {
+  const drag = state.panDrag;
+  if (!drag) return;
+  event.preventDefault();
+  const maxScrollLeft = Math.max(0, els.ganttScroll.scrollWidth - els.ganttScroll.clientWidth);
+  const maxScrollTop = Math.max(0, els.ganttScroll.scrollHeight - els.ganttScroll.clientHeight);
+  els.ganttScroll.scrollLeft = clamp(drag.startScrollLeft - (event.clientX - drag.startX), 0, maxScrollLeft);
+  els.ganttScroll.scrollTop = clamp(drag.startScrollTop - (event.clientY - drag.startY), 0, maxScrollTop);
+  updateTimelineNavigatorWindow();
+}
+
+function endPanDrag() {
+  window.removeEventListener("pointermove", movePanDrag);
+  window.removeEventListener("pointercancel", endPanDrag);
+  document.body.classList.remove("is-panning");
+  state.panDrag = null;
 }
 
 function zoomTimelineFromWheel(event) {
@@ -3300,6 +3362,7 @@ function renderHeaders(start, end, dayWidth, bodyHeight) {
 
 function headerTickInterval(start, end, dayWidth) {
   const defaultInterval = ZOOM[state.zoom].tickEvery;
+  if (state.zoom === "week") return 1;
   if (dayWidth < DAILY_HEADER_MIN_DAY_WIDTH) return defaultInterval;
   const visibleWidth = Math.max(0, Number(els.ganttScroll?.clientWidth || 0) - currentTableWidth());
   const visibleDays = visibleWidth > 0 ? Math.ceil(visibleWidth / dayWidth) : daysBetween(start, end) + 1;
@@ -6888,7 +6951,7 @@ function rowSelectionClass(row) {
 }
 
 function startSelectionDrag(event, area) {
-  if (event.button !== 0 || state.drag || state.dependencyDrag || state.rowReorderDrag || state.createDrag || state.timelineNavigatorDrag) return;
+  if (event.button !== 0 || state.panMode || state.panDrag || state.drag || state.dependencyDrag || state.rowReorderDrag || state.createDrag || state.timelineNavigatorDrag) return;
   if (area === "timeline" && event.target.closest(".gantt-bar") && !isSelectionModifier(event)) return;
   if (area === "timeline" && event.altKey) {
     startTimelineCreateDrag(event);

@@ -458,6 +458,20 @@ button.ops-summary-chip:hover {
   overflow: auto;
 }
 
+body.is-pan-mode .gantt-scroll {
+  cursor: grab;
+}
+
+body.is-pan-mode .gantt-scroll :is(.gantt-bar, .task-row, .timeline-body, .task-table) {
+  cursor: grab;
+}
+
+body.is-panning .gantt-scroll,
+body.is-panning .gantt-scroll * {
+  cursor: grabbing !important;
+  user-select: none;
+}
+
 .gantt-content {
   --timeline-width: 1200px;
   position: relative;
