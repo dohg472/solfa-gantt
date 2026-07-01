@@ -1485,7 +1485,7 @@ function buildRows(tasks) {
             ...project,
             tasks: visibleTasks,
             displayTasks: displayTasksForProject(visibleTasks),
-            name: project.aliasName || displayProjectName(project.tasks, project.name),
+            name: pauseProjectDisplayName(visibleTasks) || project.aliasName || displayProjectName(project.tasks, project.name),
             range: rangeOf(visibleTasks),
           };
         })
@@ -1594,11 +1594,12 @@ function buildRows(tasks) {
         progress: projectProgress,
         health: projectHealth,
         collapsed: state.collapsedRows.has(projectId),
+        leafOnly: isPauseProject(project),
         taskIds: project.tasks.map((task) => task.id),
         issue: projectIssue?.kind || "",
       });
 
-      if (state.collapsedRows.has(projectId)) continue;
+      if (state.collapsedRows.has(projectId) || isPauseProject(project)) continue;
 
       (project.displayTasks || project.tasks)
         .slice()
@@ -1696,6 +1697,14 @@ function projectSubtitle(tasks, progress, issue) {
 
 function projectColor(project) {
   return project?.tasks?.some(isWonheePauseTask) ? PAUSE_COLOR : "#D8842F";
+}
+
+function isPauseProject(project) {
+  return Boolean(project?.tasks?.length && project.tasks.every(isWonheePauseTask));
+}
+
+function pauseProjectDisplayName(tasks) {
+  return tasks?.some(isWonheePauseTask) ? "\uD734\uC7AC" : "";
 }
 
 function displayTasksForProject(tasks) {
@@ -2660,6 +2669,8 @@ function cleanProjectName(value) {
 }
 
 function displayProjectName(tasks, fallback) {
+  const pauseName = pauseProjectDisplayName(tasks);
+  if (pauseName) return pauseName;
   const candidates = tasks
     .map((task) => task.project || task.title || fallback)
     .filter(Boolean)
@@ -3474,6 +3485,7 @@ function renderRows(rows, criticalTaskIds) {
       const dependencyConflict = row.dependencyConflictCount ? " is-dependency-conflict" : "";
       const workloadConflict = row.workloadRiskCount ? " is-workload-conflict" : "";
       const reordering = state.rowReorderDrag?.rowId === row.id ? " is-reordering" : "";
+      const leaf = row.leafOnly ? " is-leaf" : "";
       const range = row.hiddenOnly ? "숨김 유지" : `${dateLabel(row.start)}-${dateLabel(row.end)}`;
       const nameTitle = row.hiddenOnly ? row.title : `${row.title} · 더블클릭해 이름 수정`;
       const rangeTitle = row.hiddenOnly ? range : `${range} · 더블클릭해 기간 수정`;
@@ -3503,7 +3515,7 @@ function renderRows(rows, criticalTaskIds) {
       }
 
       return `
-        <div class="task-row group-row ${row.kind}${issue}${dependencyConflict}${workloadConflict}${reordering}${row.hiddenOnly ? " is-readonly" : ""}" data-row-id="${escapeHtml(row.id)}" style="--task-color:${row.color};--progress:${row.progress}%">
+        <div class="task-row group-row ${row.kind}${issue}${dependencyConflict}${workloadConflict}${reordering}${leaf}${row.hiddenOnly ? " is-readonly" : ""}" data-row-id="${escapeHtml(row.id)}" style="--task-color:${row.color};--progress:${row.progress}%">
           <span class="task-main level-${row.kind}">
             <span class="group-caret">${row.collapsed ? "▸" : "▾"}</span>
             <span class="task-text">

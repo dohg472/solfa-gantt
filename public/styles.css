@@ -702,6 +702,10 @@ body.is-table-resizing * {
   background: #f4efe5;
 }
 
+.group-row.project.is-leaf {
+  background: #eef0f2;
+}
+
 .group-row.project.is-issue-upload-only {
   background: #f4efe5;
 }
@@ -724,6 +728,16 @@ body.is-table-resizing * {
 .group-row.project.is-selected,
 .group-row.project.is-partial-selected {
   background: #f4efe5;
+}
+
+.group-row.project.is-leaf:hover,
+.group-row.project.is-leaf.is-selected,
+.group-row.project.is-leaf.is-partial-selected {
+  background: #eef0f2;
+}
+
+.group-row.is-leaf .group-caret {
+  visibility: hidden;
 }
 
 .task-row.is-selected {
