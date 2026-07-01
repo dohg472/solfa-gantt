@@ -411,6 +411,10 @@ function bindEvents() {
   els.redoButton.addEventListener("click", runRedo);
   els.closeEditorButton.addEventListener("click", closeEditor);
   els.editor.addEventListener("keydown", (event) => {
+    if (handleUndoRedoShortcut(event)) {
+      event.stopPropagation();
+      return;
+    }
     if (event.key !== "Escape" || !state.editorOpen) return;
     event.preventDefault();
     event.stopPropagation();
@@ -523,16 +527,7 @@ function bindEvents() {
   });
 
   document.addEventListener("keydown", (event) => {
-    if ((event.ctrlKey || event.metaKey) && (event.key.toLowerCase() === "y" || (event.key.toLowerCase() === "z" && event.shiftKey))) {
-      event.preventDefault();
-      runRedo();
-      return;
-    }
-    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z" && !event.shiftKey) {
-      event.preventDefault();
-      runUndo();
-      return;
-    }
+    if (handleUndoRedoShortcut(event)) return;
     if (handleKeyboardScheduleNudge(event)) return;
     if (event.key === "Escape") {
       if (state.panMode) {
@@ -579,6 +574,22 @@ function handleKeyboardScheduleNudge(event) {
     shiftSelectedTasks(delta);
   }
   return true;
+}
+
+function handleUndoRedoShortcut(event) {
+  if (!(event.ctrlKey || event.metaKey) || event.altKey) return false;
+  const key = event.key.toLowerCase();
+  if (key === "z" && !event.shiftKey) {
+    event.preventDefault();
+    runUndo();
+    return true;
+  }
+  if (key === "y" || (key === "z" && event.shiftKey)) {
+    event.preventDefault();
+    runRedo();
+    return true;
+  }
+  return false;
 }
 
 function keyboardNudgeBlocked(event) {
