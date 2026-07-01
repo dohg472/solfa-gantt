@@ -484,15 +484,18 @@ button.ops-summary-chip:hover {
   position: sticky;
   top: 0;
   height: var(--head-height);
-  z-index: 5;
+  z-index: 720;
   border-bottom: 1px solid var(--line);
   background: rgba(255, 254, 250, 0.96);
   backdrop-filter: blur(10px);
+  box-shadow: 0 8px 18px rgba(40, 37, 31, 0.06);
 }
 
 .table-head {
+  grid-column: 1;
+  grid-row: 1;
   left: 0;
-  z-index: 320;
+  z-index: 760;
   display: grid;
   grid-template-columns: minmax(0, 1fr) var(--range-width);
   align-items: end;
@@ -516,6 +519,8 @@ button.ops-summary-chip:hover {
 }
 
 .timeline-head {
+  grid-column: 2;
+  grid-row: 1;
   overflow: hidden;
 }
 

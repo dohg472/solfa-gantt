@@ -48,6 +48,7 @@ const state = {
   reviewIgnores: [],
   hiddenConvertibleProjects: [],
   hiddenProjectLeaks: [],
+  groupRanges: {},
   rows: [],
   selectedId: "",
   selectedIds: new Set(),
@@ -623,6 +624,7 @@ function viewPrefsPayload() {
     filters: state.filters,
     search: String(state.search || "").trim().slice(0, 160),
     collapsedRows: [...state.collapsedRows].slice(0, 600),
+    groupRanges: normalizeGroupRanges(state.groupRanges),
     tableWidth: state.tableWidth || 0,
     updatedAt: new Date().toISOString(),
   };
@@ -666,6 +668,7 @@ function applyViewPrefs(prefs) {
     state.tableWidth = nextTableWidth > 0 ? normalizeTableWidth(nextTableWidth) : 0;
   }
   if (Array.isArray(prefs.collapsedRows)) state.collapsedRows = new Set(prefs.collapsedRows.filter((rowId) => typeof rowId === "string"));
+  if (prefs.groupRanges && typeof prefs.groupRanges === "object") state.groupRanges = normalizeGroupRanges(prefs.groupRanges);
 }
 
 function canApplyIncomingViewPrefs() {
@@ -682,6 +685,58 @@ function canApplyIncomingViewPrefs() {
     !document.querySelector(".range-popover") &&
     !document.querySelector(".meta-popover")
   );
+}
+
+function normalizeGroupRanges(value) {
+  const result = {};
+  Object.entries(value || {}).forEach(([key, range]) => {
+    if (!key || typeof range !== "object") return;
+    const start = toDateOnly(range.start);
+    const end = toDateOnly(range.end);
+    if (!start || !end) return;
+    result[key] = compareDate(end, start) < 0 ? { start, end: start } : { start, end };
+  });
+  return result;
+}
+
+function toDateOnly(value) {
+  if (!value) return "";
+  const text = String(value).trim();
+  const direct = text.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (direct) return `${direct[1]}-${direct[2]}-${direct[3]}`;
+  const loose = text.match(/^(\d{4})[./](\d{1,2})[./](\d{1,2})/);
+  if (loose) {
+    const month = String(Number(loose[2])).padStart(2, "0");
+    const day = String(Number(loose[3])).padStart(2, "0");
+    return `${loose[1]}-${month}-${day}`;
+  }
+  const parsed = new Date(text);
+  if (Number.isNaN(parsed.getTime())) return "";
+  const year = parsed.getFullYear();
+  const month = String(parsed.getMonth() + 1).padStart(2, "0");
+  const day = String(parsed.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function groupRangeForRow(row, fallback) {
+  if (!row || !["channel", "project"].includes(row.kind)) return fallback;
+  const override = state.groupRanges?.[row.id];
+  if (!override?.start || !override?.end) return fallback;
+  return {
+    start: override.start,
+    end: compareDate(override.end, override.start) < 0 ? override.start : override.end,
+  };
+}
+
+function setGroupRangeOverride(rowId, range) {
+  if (!rowId || !range?.start || !range?.end) return;
+  const start = toDateOnly(range.start);
+  const end = toDateOnly(range.end);
+  if (!start || !end) return;
+  state.groupRanges = {
+    ...(state.groupRanges || {}),
+    [rowId]: compareDate(end, start) < 0 ? { start, end: start } : { start, end },
+  };
 }
 
 function scheduleSharedViewPrefsSave(payload) {
@@ -1324,16 +1379,20 @@ function buildRows(tasks) {
         const hiddenRange = hiddenDefaultTasks.length
           ? rangeOf(hiddenDefaultTasks)
           : channel.hiddenRange || { start: todayString(), end: todayString() };
+        const hiddenChannelId = `channel:${channel.name}`;
+        const displayRange = groupRangeForRow({ id: hiddenChannelId, kind: "channel" }, hiddenRange);
         return {
           ...channel,
           projects: [],
           tasks: [],
-          range: hiddenRange,
+          range: displayRange,
           hiddenOnly: true,
           hiddenLabel: hiddenLabels.join(" · ") || "프로젝트 숨김 유지",
         };
       }
-      return { ...channel, projects, tasks: visibleTasks, range: rangeOf(visibleTasks) };
+      const channelId = `channel:${channel.name}`;
+      const naturalRange = rangeOf(visibleTasks);
+      return { ...channel, projects, tasks: visibleTasks, range: groupRangeForRow({ id: channelId, kind: "channel" }, naturalRange) };
     })
     .filter(Boolean)
     .sort((a, b) =>
@@ -1367,28 +1426,29 @@ function buildRows(tasks) {
 
     if (state.collapsedRows.has(channelId)) continue;
 
-      for (const project of channel.projects) {
-        const projectId = `project:${channel.name}:${project.key}`;
-        const projectProgress = progressForTasks(project.tasks);
-        const projectIssue = projectIssueForTasks(project.tasks);
-        const projectHealth = healthForTasks(project.tasks);
-        const projectStatus = projectVisibilityState(project.tasks);
-        rows.push({
-          id: projectId,
-          kind: "project",
-          channel: channel.name,
-          title: project.name,
-          subtitle: projectSubtitle(project.tasks, projectProgress, projectIssue),
-          statusReason: projectIssue?.reason || "",
-          start: project.range.start,
-          end: project.range.end,
-          color: "#D8842F",
-          progress: projectProgress,
-          health: projectHealth,
-          collapsed: state.collapsedRows.has(projectId),
-          taskIds: project.tasks.map((task) => task.id),
-          issue: projectIssue?.kind || "",
-        });
+    for (const project of channel.projects) {
+      const projectId = `project:${channel.name}:${project.key}`;
+      const projectProgress = progressForTasks(project.tasks);
+      const projectIssue = projectIssueForTasks(project.tasks);
+      const projectHealth = healthForTasks(project.tasks);
+      const projectStatus = projectVisibilityState(project.tasks);
+      const projectRange = groupRangeForRow({ id: projectId, kind: "project" }, project.range);
+      rows.push({
+        id: projectId,
+        kind: "project",
+        channel: channel.name,
+        title: project.name,
+        subtitle: projectSubtitle(project.tasks, projectProgress, projectIssue),
+        statusReason: projectIssue?.reason || "",
+        start: projectRange.start,
+        end: projectRange.end,
+        color: "#D8842F",
+        progress: projectProgress,
+        health: projectHealth,
+        collapsed: state.collapsedRows.has(projectId),
+        taskIds: project.tasks.map((task) => task.id),
+        issue: projectIssue?.kind || "",
+      });
 
       if (state.collapsedRows.has(projectId)) continue;
 
@@ -3401,6 +3461,11 @@ async function saveInlineRange(row, nextStart, nextEnd) {
     return;
   }
 
+  if (["channel", "project"].includes(row.kind)) {
+    await saveGroupRangeOverride(row, { start: nextStart, end: nextEnd }, "기간 수정");
+    return;
+  }
+
   const ids = new Set(taskIdsForRow(row));
   const originals = state.tasks.filter((task) => ids.has(task.id));
   if (!originals.length) return;
@@ -3420,6 +3485,28 @@ async function saveInlineRange(row, nextStart, nextEnd) {
   if (!nextTasks.length) return;
   const mode = nextEnd !== currentRange.end ? "end" : "";
   await applyBulkTaskUpdates(nextTasks, `"${row.title}" 기간 수정`, { rescheduleMode: mode });
+}
+
+async function saveGroupRangeOverride(row, nextRange, action = "기간 수정") {
+  if (!row || !["channel", "project"].includes(row.kind) || !nextRange?.start || !nextRange?.end) return;
+  const previousRanges = { ...(state.groupRanges || {}) };
+  setGroupRangeOverride(row.id, nextRange);
+  render();
+  saveViewPrefs();
+  pushUndo(
+    `"${row.title}" ${action}`,
+    async () => {
+      state.groupRanges = previousRanges;
+      saveViewPrefs();
+      render();
+    },
+    async () => {
+      setGroupRangeOverride(row.id, nextRange);
+      saveViewPrefs();
+      render();
+    },
+  );
+  showToast(`"${row.title}" ${action}했습니다.`);
 }
 
 function rangeRescheduleMode(original, next) {
@@ -3567,7 +3654,8 @@ function renderBars(rows, dayWidth, criticalTaskIds) {
     const rawWidth = Math.max((daysBetween(row.start, row.end) + 1) * dayWidth, row.kind === "task" ? 18 : 28);
     const { left, width, clippedStart, clippedEnd } = visibleBarRect(rawLeft, rawWidth, row.kind);
     if (width <= 0) return;
-    const editableGroup = row.kind === "task" || (row.taskIds || []).some((id) => editableTaskIds.has(id));
+    const isGroupRow = row.kind === "channel" || row.kind === "project";
+    const editableGroup = row.kind === "task" || isGroupRow || (row.taskIds || []).some((id) => editableTaskIds.has(id));
     const bar = document.createElement("div");
     bar.className = `gantt-bar ${row.kind}${rowSelectionClass(row)}${row.kind === "task" && criticalTaskIds.has(row.task.id) ? " is-critical" : ""}`;
     if (row.issue) bar.classList.add(`is-issue-${row.issue}`);
@@ -5827,7 +5915,31 @@ function startGroupDrag(event, row, mode) {
   event.stopPropagation();
   const rowTaskIds = taskIdsForRow(row);
   const selectedIds = selectedTaskIds();
-  const shouldUseSelection = selectedIds.length > 1 && rowTaskIds.some((id) => state.selectedIds.has(id));
+  const isGroupRangeRow = row.kind === "channel" || row.kind === "project";
+  const shouldUseSelection = !isGroupRangeRow && selectedIds.length > 1 && rowTaskIds.some((id) => state.selectedIds.has(id));
+  if (isGroupRangeRow) {
+    state.selectedIds = new Set();
+    state.selectedId = "";
+    state.selectionAnchorRowId = row.id;
+    state.editorOpen = false;
+
+    event.currentTarget.setPointerCapture(event.pointerId);
+    document.body.classList.add("is-dragging");
+    document.body.dataset.dragMode = mode;
+    state.drag = {
+      kind: "row-range",
+      mode,
+      rowId: row.id,
+      label: row.title,
+      startX: event.clientX,
+      originalRange: { start: row.start, end: row.end },
+      previousRanges: { ...(state.groupRanges || {}) },
+      moved: false,
+    };
+    window.addEventListener("pointermove", moveDrag);
+    window.addEventListener("pointerup", endDrag, { once: true });
+    return;
+  }
   const activeIds = shouldUseSelection ? selectedIds : rowTaskIds;
   const ids = new Set(activeIds);
   const originals = state.tasks.filter((task) => ids.has(task.id)).map((task) => ({ ...task }));
@@ -5876,6 +5988,32 @@ function groupDragTasks(drag, deltaDays) {
   return [];
 }
 
+function groupDragRange(drag, deltaDays) {
+  const range = drag?.originalRange;
+  if (!range?.start || !range?.end) return null;
+  if (drag.mode === "move") {
+    return {
+      start: shiftDate(range.start, deltaDays),
+      end: shiftDate(range.end, deltaDays),
+    };
+  }
+  if (drag.mode === "resize-start") {
+    const proposed = shiftDate(range.start, deltaDays);
+    return {
+      start: compareDate(proposed, range.end) <= 0 ? proposed : range.end,
+      end: range.end,
+    };
+  }
+  if (drag.mode === "resize-end") {
+    const proposed = shiftDate(range.end, deltaDays);
+    return {
+      start: range.start,
+      end: compareDate(proposed, range.start) >= 0 ? proposed : range.start,
+    };
+  }
+  return null;
+}
+
 function groupResizeStartTasks(tasks, range, rawProposedStart) {
   const proposedStart = compareDate(rawProposedStart, range.end) <= 0 ? rawProposedStart : range.end;
   const isExtending = compareDate(proposedStart, range.start) < 0;
@@ -5909,6 +6047,16 @@ function moveDrag(event) {
   const dayWidth = ZOOM[state.zoom].dayWidth;
   const deltaDays = Math.round((event.clientX - state.drag.startX) / dayWidth);
   if (deltaDays === 0 && !state.drag.moved) return;
+
+  if (state.drag.kind === "row-range") {
+    const nextRange = groupDragRange(state.drag, deltaDays);
+    if (!nextRange) return;
+    state.drag.moved = true;
+    setGroupRangeOverride(state.drag.rowId, nextRange);
+    updateDragTooltip(event, state.drag, deltaDays);
+    render();
+    return;
+  }
 
   if (state.drag.kind === "group") {
     state.drag.moved = true;
@@ -5959,6 +6107,27 @@ async function endDrag() {
   state.drag = null;
 
   if (!dragged.moved) return;
+  if (dragged.kind === "row-range") {
+    const nextRange = state.groupRanges?.[dragged.rowId] || dragged.originalRange;
+    const action = dragActionLabel(dragged.mode);
+    saveViewPrefs();
+    pushUndo(
+      `"${dragged.label}" ${action}`,
+      async () => {
+        state.groupRanges = dragged.previousRanges || {};
+        saveViewPrefs();
+        render();
+      },
+      async () => {
+        setGroupRangeOverride(dragged.rowId, nextRange);
+        saveViewPrefs();
+        render();
+      },
+    );
+    showToast(`"${dragged.label}" ${action}했습니다.`);
+    render();
+    return;
+  }
   if (dragged.kind === "group") {
     const ids = dragged.changedIds?.size ? dragged.changedIds : new Set(dragged.originals.map((task) => task.id));
     const originalById = new Map(dragged.originals.map((task) => [task.id, task]));
@@ -6092,9 +6261,11 @@ function dragActionLabel(mode) {
 
 function updateDragTooltip(event, drag, deltaDays, nextTasks = []) {
   if (!drag) return;
-  const range = drag.kind === "group"
-    ? rangeOf(state.tasks.filter((task) => (drag.originals || []).some((original) => original.id === task.id)))
-    : rangeOf(nextTasks.length ? nextTasks : [state.tasks.find((task) => task.id === drag.taskId)].filter(Boolean));
+  const range = drag.kind === "row-range"
+    ? state.groupRanges?.[drag.rowId] || drag.originalRange
+    : drag.kind === "group"
+      ? rangeOf(state.tasks.filter((task) => (drag.originals || []).some((original) => original.id === task.id)))
+      : rangeOf(nextTasks.length ? nextTasks : [state.tasks.find((task) => task.id === drag.taskId)].filter(Boolean));
   if (!range?.start || !range?.end) return;
 
   const action = dragActionLabel(drag.mode);
