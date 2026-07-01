@@ -632,13 +632,18 @@ body.is-table-resizing * {
 }
 
 .group-row {
-  cursor: pointer;
+  cursor: grab;
 }
 
 .group-row.is-readonly {
-  cursor: default;
+  cursor: grab;
   opacity: 1;
   color: var(--muted);
+}
+
+.group-row.is-reordering {
+  opacity: 0.72;
+  box-shadow: inset 4px 0 0 var(--task-color), 0 0 0 1px rgba(23, 107, 101, 0.18);
 }
 
 .group-row.is-readonly .task-name {
@@ -1564,7 +1569,9 @@ body.is-linking * {
 body.is-dragging,
 body.is-dragging *,
 body.is-navigator-dragging,
-body.is-navigator-dragging * {
+body.is-navigator-dragging *,
+body.is-row-reordering,
+body.is-row-reordering * {
   cursor: grabbing !important;
 }
 

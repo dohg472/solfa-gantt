@@ -231,6 +231,7 @@ async function getTasksPayload(env, request, options = {}) {
     tasks,
     channels: hiddenChannelSummaries([...sourceTasks, ...targetTasks], store),
     hiddenChannels: store.hiddenChannels || [],
+    hiddenProjects: store.hiddenProjects || [],
     connection: {
       mode: "notion",
       read: Boolean(config(env).readDatabaseId),
@@ -276,6 +277,7 @@ function decorateTaskPayload(payload, store, request, env) {
   return {
     ...payload,
     hiddenChannels: store.hiddenChannels || [],
+    hiddenProjects: store.hiddenProjects || [],
     reviewIgnores: store.reviewIgnores || [],
     baseline: baselineSummary(store.baseline),
     sync: storeMeta(store),

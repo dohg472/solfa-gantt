@@ -48,7 +48,9 @@ const state = {
   reviewIgnores: [],
   hiddenConvertibleProjects: [],
   hiddenProjectLeaks: [],
+  hiddenProjects: [],
   groupRanges: {},
+  rowOrder: [],
   rows: [],
   selectedId: "",
   selectedIds: new Set(),
@@ -73,6 +75,7 @@ const state = {
   drag: null,
   dependencyDrag: null,
   selectionDrag: null,
+  rowReorderDrag: null,
   createDrag: null,
   tableResizeDrag: null,
   timelineNavigatorDrag: null,
@@ -626,6 +629,7 @@ function viewPrefsPayload() {
     search: String(state.search || "").trim().slice(0, 160),
     collapsedRows: [...state.collapsedRows].slice(0, 600),
     groupRanges: normalizeGroupRanges(state.groupRanges),
+    rowOrder: normalizeRowOrder(state.rowOrder),
     tableWidth: state.tableWidth || 0,
     updatedAt: new Date().toISOString(),
   };
@@ -670,6 +674,7 @@ function applyViewPrefs(prefs) {
   }
   if (Array.isArray(prefs.collapsedRows)) state.collapsedRows = new Set(prefs.collapsedRows.filter((rowId) => typeof rowId === "string"));
   if (prefs.groupRanges && typeof prefs.groupRanges === "object") state.groupRanges = normalizeGroupRanges(prefs.groupRanges);
+  if (Array.isArray(prefs.rowOrder)) state.rowOrder = normalizeRowOrder(prefs.rowOrder);
 }
 
 function canApplyIncomingViewPrefs() {
@@ -677,6 +682,7 @@ function canApplyIncomingViewPrefs() {
     !state.drag &&
     !state.dependencyDrag &&
     !state.selectionDrag &&
+    !state.rowReorderDrag &&
     !state.createDrag &&
     !state.tableResizeDrag &&
     !state.timelineNavigatorDrag &&
@@ -698,6 +704,10 @@ function normalizeGroupRanges(value) {
     result[key] = compareDate(end, start) < 0 ? { start, end: start } : { start, end };
   });
   return result;
+}
+
+function normalizeRowOrder(value) {
+  return [...new Set((value || []).filter((rowId) => typeof rowId === "string" && rowId.trim()).map((rowId) => rowId.trim()))].slice(0, 800);
 }
 
 function toDateOnly(value) {
@@ -943,6 +953,7 @@ function isAutoSyncBusy() {
     state.drag ||
     state.dependencyDrag ||
     state.selectionDrag ||
+    state.rowReorderDrag ||
     state.createDrag ||
     state.tableResizeDrag ||
     state.timelineNavigatorDrag ||
@@ -969,6 +980,7 @@ async function loadTasks(options = {}) {
     state.tasks = data.tasks || [];
     state.channelStubs = data.channels || [];
     state.hiddenChannels = Array.isArray(data.hiddenChannels) ? data.hiddenChannels : [];
+    state.hiddenProjects = Array.isArray(data.hiddenProjects) ? data.hiddenProjects : [];
     state.projectAliases = data.projectAliases || [];
     state.reviewIgnores = data.reviewIgnores || [];
     state.hiddenProjectLeaks = Array.isArray(data.hiddenProjectLeaks) ? data.hiddenProjectLeaks : [];
@@ -1356,12 +1368,12 @@ function buildRows(tasks) {
     mergeSimilarProjects(channel.projects);
   });
 
-  const channelList = [...channels.values()]
+  let channelList = [...channels.values()]
     .map((channel) => {
       const sourceProjects = [...channel.projects.values()];
       const completedProjects = sourceProjects.filter((project) => shouldHideProjectByDefault(project.tasks));
       const reviewBacklogProjects = sourceProjects.filter((project) => shouldHideReviewBacklogByDefault(project.tasks, project, sourceProjects));
-      const projects = sourceProjects
+      let projects = sourceProjects
         .filter((project) => projectMatchesIssueFilter(project.tasks, state.filters.issue))
         .filter((project) => shouldShowProjectInCurrentView(project.tasks, project, sourceProjects))
         .map((project) => {
@@ -1377,6 +1389,7 @@ function buildRows(tasks) {
         })
         .filter(Boolean)
         .sort((a, b) => compareDate(a.range.start, b.range.start) || compareText(a.name, b.name));
+      projects = applyManualRowOrder(projects, (project) => `project:${channel.name}:${project.key}`);
       const visibleTasks = projects.flatMap((project) => project.tasks);
       if (!visibleTasks.length) {
         const hiddenDefaultTasks = [...completedProjects, ...reviewBacklogProjects].flatMap((project) => project.tasks);
@@ -1392,6 +1405,7 @@ function buildRows(tasks) {
           ? rangeOf(hiddenDefaultTasks)
           : channel.hiddenRange || { start: todayString(), end: todayString() };
         const hiddenChannelId = `channel:${channel.name}`;
+        const restoreActions = hiddenRestoreActionsForChannel(channel, completedProjects, reviewBacklogProjects);
         const displayRange = groupRangeForRow({ id: hiddenChannelId, kind: "channel" }, hiddenRange);
         return {
           ...channel,
@@ -1399,6 +1413,7 @@ function buildRows(tasks) {
           tasks: [],
           range: displayRange,
           hiddenOnly: true,
+          restoreActions,
           hiddenLabel: hiddenLabels.join(" · ") || "프로젝트 숨김 유지",
         };
       }
@@ -1412,6 +1427,8 @@ function buildRows(tasks) {
       compareDate(a.range.start, b.range.start) ||
       compareText(a.name, b.name)
     );
+
+  channelList = applyManualRowOrder(channelList, (channel) => `channel:${channel.name}`);
 
   const rows = [];
   for (const channel of channelList) {
@@ -1434,6 +1451,7 @@ function buildRows(tasks) {
       collapsed: state.collapsedRows.has(channelId),
       taskIds: channel.tasks.length ? channel.tasks.map((task) => task.id) : channel.hiddenTaskIds || [],
       hiddenOnly: Boolean(channel.hiddenOnly),
+      restoreActions: channel.restoreActions || [],
     });
 
     if (state.collapsedRows.has(channelId)) continue;
@@ -1488,6 +1506,66 @@ function buildRows(tasks) {
   }
 
   return rows;
+}
+
+function applyManualRowOrder(items, idForItem) {
+  if (!items?.length || !state.rowOrder?.length) return items;
+  const manualIndex = new Map(state.rowOrder.map((id, index) => [id, index]));
+  return items
+    .map((item, index) => ({
+      item,
+      index,
+      order: manualIndex.has(idForItem(item)) ? manualIndex.get(idForItem(item)) : Number.POSITIVE_INFINITY,
+    }))
+    .sort((a, b) => a.order - b.order || a.index - b.index)
+    .map((entry) => entry.item);
+}
+
+function hiddenRestoreActionsForChannel(channel, completedProjects = [], reviewBacklogProjects = []) {
+  const actions = [];
+  const normalizedChannel = normalizeChannelName(channel?.name || "");
+  if (!normalizedChannel) return actions;
+
+  if (isClientHiddenChannel(channel.name)) {
+    actions.push({ type: "channel", channel: channel.name });
+  }
+
+  (state.hiddenProjects || [])
+    .filter((item) => normalizeChannelName(item.channel) === normalizedChannel)
+    .forEach((item) => {
+      if (item.project) actions.push({ type: "project", channel: item.channel || channel.name, project: item.project });
+    });
+
+  (channel.hiddenTaskIds || []).forEach((id) => {
+    if (id) actions.push({ type: "task", id });
+  });
+
+  if (!actions.length && (completedProjects.length || reviewBacklogProjects.length)) {
+    actions.push({ type: "show-completed", channel: channel.name });
+  }
+
+  return uniqueRestoreActions(actions);
+}
+
+function hiddenRestoreActionsForRow(row) {
+  if (!row?.hiddenOnly) return [];
+  if (Array.isArray(row.restoreActions) && row.restoreActions.length) return uniqueRestoreActions(row.restoreActions);
+  const actions = [];
+  if (row.kind === "channel" && isClientHiddenChannel(row.title)) {
+    actions.push({ type: "channel", channel: row.title });
+  }
+  taskIdsForRow(row).forEach((id) => actions.push({ type: "task", id }));
+  return uniqueRestoreActions(actions);
+}
+
+function uniqueRestoreActions(actions) {
+  const seen = new Set();
+  return (actions || []).filter((action) => {
+    const key = [action.type, action.channel || "", action.project || "", action.id || ""].join("|");
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 function projectSubtitle(tasks, progress, issue) {
@@ -3221,6 +3299,7 @@ function renderRows(rows, criticalTaskIds) {
       const issue = row.issue ? ` is-issue-${escapeHtml(row.issue)}` : "";
       const dependencyConflict = row.dependencyConflictCount ? " is-dependency-conflict" : "";
       const workloadConflict = row.workloadRiskCount ? " is-workload-conflict" : "";
+      const reordering = state.rowReorderDrag?.rowId === row.id ? " is-reordering" : "";
       const range = row.hiddenOnly ? "숨김 유지" : `${dateLabel(row.start)}-${dateLabel(row.end)}`;
       const nameTitle = row.hiddenOnly ? row.title : `${row.title} · 더블클릭해 이름 수정`;
       const rangeTitle = row.hiddenOnly ? range : `${range} · 더블클릭해 기간 수정`;
@@ -3250,7 +3329,7 @@ function renderRows(rows, criticalTaskIds) {
       }
 
       return `
-        <div class="task-row group-row ${row.kind}${issue}${dependencyConflict}${workloadConflict}${row.hiddenOnly ? " is-readonly" : ""}" data-row-id="${escapeHtml(row.id)}" style="--task-color:${row.color};--progress:${row.progress}%">
+        <div class="task-row group-row ${row.kind}${issue}${dependencyConflict}${workloadConflict}${reordering}${row.hiddenOnly ? " is-readonly" : ""}" data-row-id="${escapeHtml(row.id)}" style="--task-color:${row.color};--progress:${row.progress}%">
           <span class="task-main level-${row.kind}">
             <span class="group-caret">${row.collapsed ? "▸" : "▾"}</span>
             <span class="task-text">
@@ -3323,6 +3402,14 @@ function renderRows(rows, criticalTaskIds) {
     editableRange?.addEventListener("dblclick", (event) => {
       const row = state.rows.find((item) => item.id === element.dataset.rowId);
       if (row) startInlineRangeEdit(event, row);
+    });
+    element.addEventListener("pointerdown", (event) => {
+      const row = state.rows.find((item) => item.id === element.dataset.rowId);
+      if (row) startRowReorderDrag(event, row);
+    });
+    element.addEventListener("mousedown", (event) => {
+      const row = state.rows.find((item) => item.id === element.dataset.rowId);
+      if (row) startRowReorderDrag(event, row);
     });
     element.addEventListener("click", (event) => {
       if (state.suppressClick) return;
@@ -4221,9 +4308,10 @@ function openRowContext(event, row, date = "") {
   const rowTaskIds = taskIdsForRow(row);
   const useSelection = state.selectedIds.size > 1 && rowTaskIds.some((id) => state.selectedIds.has(id));
   const taskIds = useSelection ? [...state.selectedIds] : rowTaskIds;
-  if (!taskIds.length) return;
+  const restoreActions = useSelection ? [] : hiddenRestoreActionsForRow(row);
+  if (!taskIds.length && !restoreActions.length) return;
 
-  if (!useSelection) {
+  if (!useSelection && taskIds.length) {
     applySelection(taskIds, row.id, row.kind === "task" && taskIds.length === 1);
   }
 
@@ -4234,18 +4322,20 @@ function openRowContext(event, row, date = "") {
     channel: row.channel || row.task?.channel || "",
     project: row.kind === "project" ? row.title : row.task?.project || "",
     title: useSelection ? `${taskIds.length}개 선택` : row.title,
+    summary: row.hiddenLabel || row.subtitle || "",
     hiddenOnly: Boolean(row.hiddenOnly),
+    restoreActions,
     date,
   };
   render();
   showContextMenu(event.clientX, event.clientY, {
-    summary: contextSummary(state.context),
+    summary: contextSummary(state.context) || state.context.summary || row.title,
     canCreate: !useSelection && Boolean(date),
     canEdit: !useSelection && row.kind === "task" && taskIds.length === 1,
     canRename: !useSelection && ["channel", "project"].includes(row.kind) && !row.hiddenOnly,
     canMerge: canMergeContextProjects(useSelection ? "selection" : row.kind, taskIds),
     canDone: tasksForIds(taskIds).some((task) => !isDoneTask(task)),
-    canRestore: !useSelection && row.hiddenOnly,
+    canRestore: !useSelection && restoreActions.length > 0,
     hasDate: Boolean(date),
     kind: state.context.kind,
   });
@@ -4558,15 +4648,30 @@ async function restoreContextHiddenItem() {
   const context = state.context;
   if (!context) return;
   hideContextMenu();
-  const body = {
-    type: context.kind,
-    channel: context.channel || context.title,
-    project: context.project || context.title,
-    id: context.taskId || context.taskIds?.[0] || "",
-  };
-  if (!(await confirmRestoreHiddenPreview(body, context.title, contextSummary(context)))) return;
+  const actions = context.restoreActions?.length
+    ? context.restoreActions
+    : [
+        {
+          type: context.kind,
+          channel: context.channel || context.title,
+          project: context.project || context.title,
+          id: context.taskId || context.taskIds?.[0] || "",
+        },
+      ];
+  if (!(await confirmRestoreHiddenPreview(actions[0], context.title, contextSummary(context) || context.summary))) return;
   try {
-    await restoreHidden(body);
+    const remoteActions = [];
+    for (const action of actions) {
+      if (action.type === "show-completed") {
+        state.showCompleted = true;
+        continue;
+      }
+      remoteActions.push(action);
+    }
+    for (const action of remoteActions) {
+      await restoreHidden(action);
+    }
+    if (actions.some((action) => action.type === "show-completed")) saveViewPrefs();
     await loadTasks();
     if (!els.hiddenPanel.hidden) await loadHiddenState();
     showToast("숨김을 복구했습니다.");
@@ -6431,6 +6536,165 @@ function taskIdsInRowRange(fromRowId, toRowId) {
   return [...new Set(state.rows.slice(start, end + 1).flatMap(taskIdsForRow))];
 }
 
+function startRowReorderDrag(event, row) {
+  if (!isPrimaryDragButton(event) || !["channel", "project"].includes(row?.kind)) return;
+  if (state.drag || state.dependencyDrag || state.selectionDrag || state.rowReorderDrag || state.createDrag || state.tableResizeDrag || state.timelineNavigatorDrag) return;
+  if (isSelectionModifier(event)) return;
+  if (event.target.closest("input, textarea, button, select, a, .group-caret")) return;
+
+  event.preventDefault();
+  event.stopPropagation();
+  hideContextMenu();
+  state.rowReorderDrag = {
+    rowId: row.id,
+    kind: row.kind,
+    channel: row.channel || row.title,
+    title: row.title,
+    startY: event.clientY,
+    previousRowOrder: [...(state.rowOrder || [])],
+    moved: false,
+  };
+  try {
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+  } catch {
+    // Some embedded browsers do not allow pointer capture for synthetic or proxied pointer events.
+  }
+  document.body.classList.add("is-row-reordering");
+  window.addEventListener("pointermove", moveRowReorderDrag);
+  window.addEventListener("pointerup", endRowReorderDrag, { once: true });
+  window.addEventListener("mousemove", moveRowReorderDrag);
+  window.addEventListener("mouseup", endRowReorderDrag, { once: true });
+}
+
+function isPrimaryDragButton(event) {
+  return event.button === 0 || (event.button === 1 && (event.buttons === 1 || event.buttons == null));
+}
+
+function moveRowReorderDrag(event) {
+  const drag = state.rowReorderDrag;
+  if (!drag) return;
+  const distance = Math.abs(event.clientY - drag.startY);
+  if (!drag.moved && distance < 8) return;
+
+  event.preventDefault();
+  drag.moved = true;
+  state.suppressClick = true;
+  const target = rowReorderTarget(drag, event.clientY);
+  if (!target) return;
+  const order = reorderedSiblingIds(drag.rowId, target.siblingIds, target.rowId, target.insertAfter);
+  if (!order || arraysEqual(order.nextIds, target.siblingIds)) return;
+  state.rowOrder = mergeManualRowOrder(order.siblingIds, order.nextIds);
+  render();
+}
+
+function endRowReorderDrag() {
+  window.removeEventListener("pointermove", moveRowReorderDrag);
+  window.removeEventListener("pointerup", endRowReorderDrag);
+  window.removeEventListener("mousemove", moveRowReorderDrag);
+  window.removeEventListener("mouseup", endRowReorderDrag);
+  document.body.classList.remove("is-row-reordering");
+  const drag = state.rowReorderDrag;
+  state.rowReorderDrag = null;
+  if (!drag?.moved) return;
+
+  const previousOrder = normalizeRowOrder(drag.previousRowOrder);
+  const nextOrder = normalizeRowOrder(state.rowOrder);
+  saveViewPrefs();
+  pushUndo(
+    `"${drag.title}" order`,
+    async () => {
+      state.rowOrder = previousOrder;
+      saveViewPrefs();
+      render();
+    },
+    async () => {
+      state.rowOrder = nextOrder;
+      saveViewPrefs();
+      render();
+    },
+  );
+  render();
+  showToast("순서를 저장했습니다.");
+  setTimeout(() => {
+    state.suppressClick = false;
+  }, 0);
+}
+
+function rowReorderTarget(drag, clientY) {
+  const index = rowIndexFromTableClientY(clientY);
+  if (index < 0) return null;
+  let targetRow = state.rows[index];
+  if (!targetRow) return null;
+
+  if (drag.kind === "channel") {
+    if (targetRow.kind !== "channel") targetRow = parentChannelRowForIndex(index);
+    if (!targetRow || targetRow.id === drag.rowId) return null;
+    const siblingIds = state.rows.filter((row) => row.kind === "channel").map((row) => row.id);
+    return { rowId: targetRow.id, siblingIds, insertAfter: shouldInsertAfterRow(targetRow, clientY) };
+  }
+
+  if (drag.kind === "project") {
+    if (targetRow.kind !== "project") targetRow = parentProjectRowForIndex(index);
+    if (!targetRow || targetRow.id === drag.rowId || !sameChannelName(targetRow.channel, drag.channel)) return null;
+    const siblingIds = state.rows
+      .filter((row) => row.kind === "project" && sameChannelName(row.channel, drag.channel))
+      .map((row) => row.id);
+    return { rowId: targetRow.id, siblingIds, insertAfter: shouldInsertAfterRow(targetRow, clientY) };
+  }
+
+  return null;
+}
+
+function rowIndexFromTableClientY(clientY) {
+  const rect = els.taskTable.getBoundingClientRect();
+  if (clientY < rect.top || clientY > rect.bottom) return -1;
+  return clamp(Math.floor((clientY - rect.top) / currentRowHeight()), 0, state.rows.length - 1);
+}
+
+function parentChannelRowForIndex(index) {
+  for (let cursor = index; cursor >= 0; cursor -= 1) {
+    const row = state.rows[cursor];
+    if (row?.kind === "channel") return row;
+  }
+  return null;
+}
+
+function parentProjectRowForIndex(index) {
+  for (let cursor = index; cursor >= 0; cursor -= 1) {
+    const row = state.rows[cursor];
+    if (row?.kind === "channel") return null;
+    if (row?.kind === "project") return row;
+  }
+  return null;
+}
+
+function shouldInsertAfterRow(row, clientY) {
+  const element = [...els.taskTable.querySelectorAll("[data-row-id]")].find((item) => item.dataset.rowId === row.id);
+  const rect = element?.getBoundingClientRect();
+  if (!rect) return false;
+  return clientY > rect.top + rect.height / 2;
+}
+
+function reorderedSiblingIds(rowId, siblingIds, targetRowId, insertAfter) {
+  if (!siblingIds.includes(rowId) || !siblingIds.includes(targetRowId)) return null;
+  const nextIds = siblingIds.filter((id) => id !== rowId);
+  const targetIndex = nextIds.indexOf(targetRowId);
+  if (targetIndex < 0) return null;
+  nextIds.splice(targetIndex + (insertAfter ? 1 : 0), 0, rowId);
+  return { siblingIds, nextIds };
+}
+
+function mergeManualRowOrder(siblingIds, nextIds) {
+  const siblingSet = new Set(siblingIds);
+  const unrelated = normalizeRowOrder(state.rowOrder).filter((id) => !siblingSet.has(id));
+  return normalizeRowOrder([...unrelated, ...nextIds]);
+}
+
+function arraysEqual(a, b) {
+  if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+  return a.every((item, index) => item === b[index]);
+}
+
 function scheduleSelectedRangeFocus(ids, options = {}) {
   const taskIds = [...new Set(ids || [])].filter(Boolean);
   if (!taskIds.length) return;
@@ -6504,7 +6768,7 @@ function focusRowInView(rowId, options = {}) {
 
 function focusTaskIdsInTimeline(ids, options = {}) {
   const tasks = tasksForIds(ids).filter((task) => task.start && task.end);
-  if (!tasks.length || state.drag || state.selectionDrag || state.createDrag || state.tableResizeDrag || state.timelineNavigatorDrag) return;
+  if (!tasks.length || state.drag || state.selectionDrag || state.rowReorderDrag || state.createDrag || state.tableResizeDrag || state.timelineNavigatorDrag) return;
   const range = rangeOf(tasks);
   if (!range?.start || !range?.end) return;
   focusDateRangeInTimeline(range.start, range.end, options);
@@ -6551,7 +6815,7 @@ function rowSelectionClass(row) {
 }
 
 function startSelectionDrag(event, area) {
-  if (event.button !== 0 || state.drag || state.dependencyDrag || state.createDrag || state.timelineNavigatorDrag) return;
+  if (event.button !== 0 || state.drag || state.dependencyDrag || state.rowReorderDrag || state.createDrag || state.timelineNavigatorDrag) return;
   if (area === "timeline" && event.target.closest(".gantt-bar") && !isSelectionModifier(event)) return;
   if (area === "timeline" && event.altKey) {
     startTimelineCreateDrag(event);
