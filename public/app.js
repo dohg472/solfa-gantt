@@ -2311,6 +2311,30 @@ function canonicalProjectKey(value) {
   return cleanProjectName(value).replace(/\s+/g, "") || "새프로젝트";
 }
 
+function upsertLocalProjectAlias(channel, from, to) {
+  const channelName = channel || "";
+  const fromName = from || "";
+  const toName = to || "";
+  const channelKey = normalizeChannelName(channelName);
+  const fromKey = canonicalProjectKey(fromName);
+  if (!channelKey || !fromKey || !toName) return;
+
+  state.projectAliases = [
+    ...state.projectAliases.filter(
+      (item) => !(sameChannelName(item.channel, channelName) && canonicalProjectKey(item.from) === fromKey),
+    ),
+    {
+      channel: channelName,
+      channelKey,
+      from: fromName,
+      fromKey,
+      to: toName,
+      toKey: canonicalProjectKey(toName),
+      updatedAt: new Date().toISOString(),
+    },
+  ];
+}
+
 function resolveProjectAliasName(channel, projectName) {
   let resolved = projectName || "새 프로젝트";
   const visited = new Set();
@@ -4696,10 +4720,10 @@ async function mergeContextProjects() {
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || "프로젝트 병합 기준을 저장하지 못했습니다.");
-      state.projectAliases = result.projectAliases || state.projectAliases;
+      upsertLocalProjectAlias(channel, from, target);
     }
     pushUndo("프로젝트 병합", () => deleteProjectAliases(aliases.map((from) => ({ channel, from }))));
-    notifyDataChanged("project-alias");
+    refreshAfterLocalMutation("project-alias", 250);
     showToast(`프로젝트를 "${target}" 기준으로 묶었습니다.`);
     render();
   } catch (error) {
@@ -9980,10 +10004,10 @@ async function mergeReviewGroup(key) {
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || "프로젝트 병합 기준을 저장하지 못했습니다.");
-      state.projectAliases = result.projectAliases || state.projectAliases;
+      upsertLocalProjectAlias(group.channel, from, target);
     }
     pushUndo("프로젝트 병합", () => deleteProjectAliases(aliases.map((from) => ({ channel: group.channel, from }))));
-    notifyDataChanged("project-alias");
+    refreshAfterLocalMutation("project-alias", 250);
     showToast(`${aliases.length}개 프로젝트명을 "${target}" 기준으로 묶었습니다.`);
     render();
     renderReviewPanel();
@@ -10055,10 +10079,10 @@ async function mergeNearbyReviewGroup(key, candidateKey) {
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || "프로젝트 병합 기준을 저장하지 못했습니다.");
-      state.projectAliases = result.projectAliases || state.projectAliases;
+      upsertLocalProjectAlias(reportGroup.channel, from, target);
     }
     pushUndo("근처 후보 병합", () => deleteProjectAliases(aliases.map((from) => ({ channel: reportGroup.channel, from }))));
-    notifyDataChanged("nearby-project-alias");
+    refreshAfterLocalMutation("nearby-project-alias", 250);
     showToast(`근처 후보를 "${target}" 기준으로 묶었습니다.`);
     render();
     renderReviewPanel();
