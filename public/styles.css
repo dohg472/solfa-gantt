@@ -551,6 +551,27 @@ button.ops-summary-chip:hover {
   font-size: 11px;
 }
 
+.tick-cell.is-daily {
+  justify-content: center;
+  padding-left: 0;
+  padding-inline: 2px;
+  border-left-color: rgba(218, 211, 199, 0.55);
+  font-size: 10px;
+  font-weight: 620;
+  letter-spacing: 0;
+  text-align: center;
+}
+
+.tick-cell.is-daily.is-weekend {
+  color: #9a7a70;
+  background: rgba(216, 78, 78, 0.035);
+}
+
+.tick-cell.is-daily.is-month-start {
+  color: var(--text);
+  font-weight: 760;
+}
+
 .task-table {
   position: sticky;
   left: 0;

@@ -20,6 +20,8 @@ const ZOOM = {
   week: { dayWidth: 22, tickEvery: 7 },
   month: { dayWidth: 12, tickEvery: 14 },
 };
+const DAILY_HEADER_MAX_VISIBLE_DAYS = 75;
+const DAILY_HEADER_MIN_DAY_WIDTH = 18;
 const ZOOM_ORDER = ["day", "week", "month"];
 const TABLE_WIDTH_LIMITS = {
   min: 330,
@@ -3264,12 +3266,21 @@ function renderHeaders(start, end, dayWidth, bodyHeight) {
   }
 
   const ticks = [];
-  const tickEvery = ZOOM[state.zoom].tickEvery;
+  const tickEvery = headerTickInterval(start, end, dayWidth);
   for (let index = 0; index <= daysBetween(start, end); index += tickEvery) {
     const date = addDays(parseDate(start), index);
     const left = index * dayWidth;
     const width = tickEvery * dayWidth;
-    ticks.push(`<div class="tick-cell" style="left:${left}px;width:${width}px">${shortDate(date)}</div>`);
+    const isDaily = tickEvery === 1;
+    const isMonthStart = date.getUTCDate() === 1;
+    const isWeekend = date.getUTCDay() === 0 || date.getUTCDay() === 6;
+    const classes = [
+      "tick-cell",
+      isDaily ? "is-daily" : "",
+      isDaily && isMonthStart ? "is-month-start" : "",
+      isDaily && isWeekend ? "is-weekend" : "",
+    ].filter(Boolean).join(" ");
+    ticks.push(`<div class="${classes}" style="left:${left}px;width:${width}px" title="${fullDateLabel(date)}">${timelineTickLabel(date, isDaily, dayWidth)}</div>`);
   }
 
   els.monthHeader.innerHTML = months.join("");
@@ -3285,6 +3296,24 @@ function renderHeaders(start, end, dayWidth, bodyHeight) {
   } else {
     els.todayLine.hidden = true;
   }
+}
+
+function headerTickInterval(start, end, dayWidth) {
+  const defaultInterval = ZOOM[state.zoom].tickEvery;
+  if (dayWidth < DAILY_HEADER_MIN_DAY_WIDTH) return defaultInterval;
+  const visibleWidth = Math.max(0, Number(els.ganttScroll?.clientWidth || 0) - currentTableWidth());
+  const visibleDays = visibleWidth > 0 ? Math.ceil(visibleWidth / dayWidth) : daysBetween(start, end) + 1;
+  return visibleDays <= DAILY_HEADER_MAX_VISIBLE_DAYS ? 1 : defaultInterval;
+}
+
+function timelineTickLabel(date, isDaily, dayWidth) {
+  if (!isDaily || dayWidth >= 30) return shortDate(date);
+  if (date.getUTCDate() === 1) return shortDate(date);
+  return String(date.getUTCDate());
+}
+
+function fullDateLabel(date) {
+  return `${date.getUTCFullYear()}.${String(date.getUTCMonth() + 1).padStart(2, "0")}.${String(date.getUTCDate()).padStart(2, "0")}`;
 }
 
 function timelineMarkerMarkup(start, end, dayWidth, bodyHeight) {
