@@ -1393,6 +1393,18 @@ function buildRows(tasks) {
       const visibleTasks = projects.flatMap((project) => project.tasks);
       if (!visibleTasks.length) {
         const hiddenDefaultTasks = [...completedProjects, ...reviewBacklogProjects].flatMap((project) => project.tasks);
+        const emptyPinnedChannel = Boolean(channel.pinnedEmpty && !channel.hiddenTaskIds?.length && !hiddenDefaultTasks.length);
+        if (emptyPinnedChannel) {
+          const emptyChannelId = `channel:${channel.name}`;
+          const emptyRange = channel.hiddenRange || { start: todayString(), end: todayString() };
+          return {
+            ...channel,
+            projects: [],
+            tasks: [],
+            range: groupRangeForRow({ id: emptyChannelId, kind: "channel" }, emptyRange),
+            emptyOnly: true,
+          };
+        }
         const shouldKeepHiddenChannel = Boolean(channel.hiddenTaskIds?.length || isAlwaysVisibleChannel(channel.name));
         if (!shouldKeepHiddenChannel) return null;
         const hiddenLabels = [
@@ -1442,6 +1454,8 @@ function buildRows(tasks) {
       title: channel.name,
       subtitle: channel.hiddenOnly
         ? channel.hiddenLabel || `${channel.hiddenTaskIds?.length || 0}개 숨김 일정`
+        : channel.emptyOnly
+          ? "표시할 일정 없음"
         : [`${channel.projects.length}개 프로젝트`, `${channel.tasks.length}개 일정`, channelComposition].filter(Boolean).join(" · "),
       start: channel.range.start,
       end: channel.range.end,
@@ -1451,6 +1465,7 @@ function buildRows(tasks) {
       collapsed: state.collapsedRows.has(channelId),
       taskIds: channel.tasks.length ? channel.tasks.map((task) => task.id) : channel.hiddenTaskIds || [],
       hiddenOnly: Boolean(channel.hiddenOnly),
+      emptyOnly: Boolean(channel.emptyOnly),
       restoreActions: channel.restoreActions || [],
     });
 

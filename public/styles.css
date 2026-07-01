@@ -1498,32 +1498,28 @@ body.is-linking * {
 }
 
 .color-legend {
-  position: fixed;
-  left: 14px;
-  bottom: 16px;
-  z-index: 360;
+  min-width: 0;
   display: flex;
+  align-items: center;
+  align-content: center;
   flex-wrap: wrap;
-  gap: 6px;
-  max-width: min(520px, calc(100vw - 40px));
-  padding: 6px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: rgba(255, 254, 250, 0.94);
-  box-shadow: 0 8px 22px rgba(32, 33, 36, 0.1);
+  gap: 4px;
+  max-height: 48px;
+  overflow: hidden;
 }
 
 .legend-item {
-  height: 24px;
+  height: 21px;
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  padding: 0 7px;
+  gap: 4px;
+  padding: 0 6px;
   border-radius: 999px;
   background: #f4f1e8;
   color: #4d5551;
-  font-size: 11.5px;
+  font-size: 11px;
   font-weight: 720;
+  white-space: nowrap;
 }
 
 .legend-dot {
