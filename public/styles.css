@@ -666,6 +666,10 @@ body.is-table-resizing * {
   cursor: pointer;
 }
 
+.task-row:not(.group-row) {
+  background: #fffefa;
+}
+
 .group-row {
   cursor: grab;
 }
@@ -699,20 +703,27 @@ body.is-table-resizing * {
 }
 
 .group-row.project.is-issue-upload-only {
-  background: #fff5e7;
+  background: #f4efe5;
 }
 
 .group-row.project.is-issue-missing-upload {
-  background: #fff5e7;
+  background: #f4efe5;
 }
 
 .group-row.project.is-issue-completed {
-  background: #eef7f2;
+  background: #f4efe5;
 }
 
-.task-row:hover,
-.task-row.is-selected {
-  background: #efede4;
+.group-row.channel:hover,
+.group-row.channel.is-selected,
+.group-row.channel.is-partial-selected {
+  background: #e3ded2;
+}
+
+.group-row.project:hover,
+.group-row.project.is-selected,
+.group-row.project.is-partial-selected {
+  background: #f4efe5;
 }
 
 .task-row.is-selected {
@@ -720,20 +731,25 @@ body.is-table-resizing * {
 }
 
 .task-row.is-partial-selected {
-  background: #f4f1e7;
   box-shadow: none;
 }
 
-.task-row.is-critical {
-  background: #fff3ee;
+.task-row:not(.group-row).is-critical {
+  background: #fffefa;
 }
 
-.task-row.is-dependency-conflict {
-  background: #fff3ee;
+.task-row:not(.group-row).is-dependency-conflict {
+  background: #fffefa;
 }
 
-.task-row.is-workload-conflict:not(.is-dependency-conflict) {
-  background: #fff8ea;
+.task-row:not(.group-row).is-workload-conflict:not(.is-dependency-conflict) {
+  background: #fffefa;
+}
+
+.task-row:not(.group-row):hover,
+.task-row:not(.group-row).is-selected,
+.task-row:not(.group-row).is-partial-selected {
+  background: #efede4;
 }
 
 .task-main {
