@@ -4324,7 +4324,8 @@ function openRowContext(event, row, date = "") {
   const useSelection = state.selectedIds.size > 1 && rowTaskIds.some((id) => state.selectedIds.has(id));
   const taskIds = useSelection ? [...state.selectedIds] : rowTaskIds;
   const restoreActions = useSelection ? [] : hiddenRestoreActionsForRow(row);
-  if (!taskIds.length && !restoreActions.length) return;
+  const canUseEmptyChannel = !useSelection && row.kind === "channel" && row.emptyOnly;
+  if (!taskIds.length && !restoreActions.length && !canUseEmptyChannel) return;
 
   if (!useSelection && taskIds.length) {
     applySelection(taskIds, row.id, row.kind === "task" && taskIds.length === 1);
@@ -4334,20 +4335,21 @@ function openRowContext(event, row, date = "") {
     taskId: !useSelection && row.kind === "task" && taskIds.length === 1 ? row.task.id : "",
     taskIds,
     kind: useSelection ? "selection" : row.kind,
-    channel: row.channel || row.task?.channel || "",
+    channel: row.channel || row.task?.channel || (row.kind === "channel" ? row.title : ""),
     project: row.kind === "project" ? row.title : row.task?.project || "",
     title: useSelection ? `${taskIds.length}개 선택` : row.title,
     summary: row.hiddenLabel || row.subtitle || "",
     hiddenOnly: Boolean(row.hiddenOnly),
+    emptyOnly: Boolean(row.emptyOnly),
     restoreActions,
     date,
   };
   render();
   showContextMenu(event.clientX, event.clientY, {
     summary: contextSummary(state.context) || state.context.summary || row.title,
-    canCreate: !useSelection && Boolean(date),
+    canCreate: !useSelection && (Boolean(date) || row.emptyOnly),
     canEdit: !useSelection && row.kind === "task" && taskIds.length === 1,
-    canRename: !useSelection && ["channel", "project"].includes(row.kind) && !row.hiddenOnly,
+    canRename: !useSelection && taskIds.length > 0 && ["channel", "project"].includes(row.kind) && !row.hiddenOnly,
     canMerge: canMergeContextProjects(useSelection ? "selection" : row.kind, taskIds),
     canDone: tasksForIds(taskIds).some((task) => !isDoneTask(task)),
     canRestore: !useSelection && restoreActions.length > 0,
@@ -4646,7 +4648,7 @@ async function deleteIdsRespectingProjectScope(ids, label = "선택 항목") {
 
 async function hideContextItems() {
   const context = state.context;
-  if (!context?.taskIds?.length) return;
+  if (!context || (!context.taskIds?.length && context.kind !== "channel")) return;
   hideContextMenu();
   if (context.kind === "channel") {
     await hideChannel(context.title);
@@ -4697,7 +4699,7 @@ async function restoreContextHiddenItem() {
 
 async function deleteContextItems() {
   const context = state.context;
-  if (!context?.taskIds?.length) return;
+  if (!context || (!context.taskIds?.length && context.kind !== "channel")) return;
   const label = contextLabel(context);
   hideContextMenu();
   if (context.kind === "channel") {

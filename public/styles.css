@@ -1643,19 +1643,12 @@ body.is-dragging .gantt-bar.is-partial-selected {
 
 .gantt-bar.channel .bar-handle::after,
 .gantt-bar.project .bar-handle::after {
-  content: "";
-  position: absolute;
-  top: 50%;
-  width: 3px;
-  height: 12px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.86);
-  transform: translateY(-50%);
+  content: none;
 }
 
-.gantt-bar:hover .bar-handle::after,
-.gantt-bar.is-selected .bar-handle::after,
-body.is-dragging .bar-handle::after {
+.gantt-bar.task:hover .bar-handle::after,
+.gantt-bar.task.is-selected .bar-handle::after,
+body.is-dragging .gantt-bar.task .bar-handle::after {
   content: "";
   position: absolute;
   top: 50%;
