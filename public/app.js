@@ -1294,10 +1294,10 @@ function buildRows(tasks) {
     .map((channel) => {
       const sourceProjects = [...channel.projects.values()];
       const completedProjects = sourceProjects.filter((project) => shouldHideProjectByDefault(project.tasks));
-      const reviewBacklogProjects = sourceProjects.filter((project) => shouldHideReviewBacklogByDefault(project.tasks));
+      const reviewBacklogProjects = sourceProjects.filter((project) => shouldHideReviewBacklogByDefault(project.tasks, project, sourceProjects));
       const projects = sourceProjects
         .filter((project) => projectMatchesIssueFilter(project.tasks, state.filters.issue))
-        .filter((project) => shouldShowProjectInCurrentView(project.tasks))
+        .filter((project) => shouldShowProjectInCurrentView(project.tasks, project, sourceProjects))
         .map((project) => {
           const visibleTasks = visibleTasksForProject(project.tasks);
           if (!visibleTasks.length) return null;
@@ -1379,7 +1379,7 @@ function buildRows(tasks) {
           channel: channel.name,
           title: project.name,
           subtitle: projectSubtitle(project.tasks, projectProgress, projectIssue),
-          statusReason: projectIssue?.reason || projectStatus.reason,
+          statusReason: projectIssue?.reason || "",
           start: project.range.start,
           end: project.range.end,
           color: "#D8842F",
@@ -1466,20 +1466,46 @@ function shouldHideProjectByDefault(tasks) {
   return Boolean(projectVisibilityState(tasks).hiddenByDefault);
 }
 
-function shouldShowProjectInCurrentView(tasks) {
+function shouldShowProjectInCurrentView(tasks, project = null, siblingProjects = []) {
   if (state.showCompleted) return true;
   if (state.filters.issue === "completed") return true;
   if (["upload-only", "missing-upload", "issue"].includes(state.filters.issue)) return true;
-  if (shouldHideReviewBacklogByDefault(tasks)) return false;
+  if (shouldHideReviewBacklogByDefault(tasks, project, siblingProjects)) return false;
   return !shouldHideProjectByDefault(tasks);
 }
 
-function shouldHideReviewBacklogByDefault(tasks) {
+function shouldHideReviewBacklogByDefault(tasks, project = null, siblingProjects = []) {
   const list = tasks || [];
+  if (project && hasRemainingUploadSibling(project, siblingProjects)) return false;
   return Boolean(
     isPastUploadOnlyProject(list) ||
       isStaleMissingUploadProject(list)
   );
+}
+
+function hasRemainingUploadSibling(project, siblingProjects = []) {
+  const list = project?.tasks || [];
+  if (!isMissingUploadProject(list)) return false;
+  const productionRange = rangeOf(list);
+  const projectName = projectDisplayNameForMatch(project);
+
+  return (siblingProjects || []).some((candidate) => {
+    if (!candidate || candidate === project) return false;
+    const uploadTasks = (candidate.tasks || []).filter(isUploadTask);
+    if (!uploadTasks.length) return false;
+    if (!uploadTasks.some((task) => !isDoneTask(task) && compareDate(task.end, todayString()) >= 0)) return false;
+
+    const uploadRange = rangeOf(uploadTasks);
+    const gapDays = daysBetween(productionRange.end, uploadRange.start);
+    if (gapDays < -14 || gapDays > 210) return false;
+
+    const uploadName = projectDisplayNameForMatch(candidate);
+    return nearbyProjectNameScore(projectName, uploadName) >= 0.55;
+  });
+}
+
+function projectDisplayNameForMatch(project) {
+  return project?.aliasName || displayProjectName(project?.tasks || [], project?.name || "");
 }
 
 function isStaleMissingUploadProject(tasks) {
@@ -2845,7 +2871,6 @@ function renderOpsSummary({ dependencyConflicts = [], workloadRisks = [] } = {})
   const projectRows = state.rows.filter((row) => row.kind === "project" && !row.hiddenOnly);
   const visibleTaskIds = new Set(projectRows.flatMap((row) => row.taskIds || []));
   const totalTaskCount = Number(state.diagnostics?.visibleTasks || state.tasks.length || 0);
-  const overdueTasks = taskRows.filter((row) => compareDate(row.end, todayString()) < 0 && !isDoneTask(row.task)).length;
   const uploadOnlyProjects = projectRows.filter((row) => row.issue === "upload-only").length;
   const missingUploadProjects = projectRows.filter((row) => row.issue === "missing-upload").length;
   const visibleReviewProjects = uploadOnlyProjects + missingUploadProjects;
@@ -2857,7 +2882,6 @@ function renderOpsSummary({ dependencyConflicts = [], workloadRisks = [] } = {})
     : reviewActionTotal
       ? { label: "검토 액션", value: reviewActionTotal, tone: "warn", action: "review-action" }
       : null;
-  const hiddenByDefaultProjects = state.showCompleted ? 0 : defaultHiddenProjectGroups().length;
   const fixedEmbed = Boolean(state.embed?.notionReady);
   const localEmbed = Boolean(state.embed?.localEmbedUrl);
   const embedSummary = fixedEmbed ? { value: "공개고정", tone: "ok" } : localEmbed ? { value: "로컬고정", tone: "warn" } : { value: "임시", tone: "bad" };
@@ -2869,12 +2893,9 @@ function renderOpsSummary({ dependencyConflicts = [], workloadRisks = [] } = {})
     filterSummary ? { label: "조건", value: filterSummary, tone: "warn", action: "filter" } : null,
     filterSummary ? { label: "전체", value: "보기", tone: "ok", action: "clear-filters" } : null,
     { label: "프로젝트", value: projectRows.length, tone: "ok" },
-    { label: "지연", value: overdueTasks, tone: overdueTasks ? "bad" : "ok", action: "overdue" },
     { label: "업로드 없음", value: missingUploadProjects, tone: missingUploadProjects ? "warn" : "ok", action: "missing-upload" },
     { label: "업로드만", value: uploadOnlyProjects, tone: uploadOnlyProjects ? "warn" : "ok", action: "upload-only" },
     { label: "화면 검토", value: visibleReviewProjects, tone: visibleReviewProjects ? "warn" : "ok", action: "issue" },
-    hiddenByDefaultProjects ? { label: "완료 숨김", value: hiddenByDefaultProjects, tone: "ok", action: "completed" } : null,
-    { label: "담당 중복", value: workloadRisks.length, tone: workloadRisks.length ? "warn" : "ok", action: "workload" },
     { label: "의존성", value: dependencyConflicts.length, tone: dependencyConflicts.length ? "bad" : "ok", action: "dependency" },
     { label: "임베드", value: embedSummary.value, tone: embedSummary.tone, action: "operation" },
   ].filter(Boolean);
@@ -3734,8 +3755,6 @@ function barTitle(row) {
     row.health?.label,
     row.statusReason,
     row.dependencyConflictCount ? `의존성 충돌 ${row.dependencyConflictCount}개` : "",
-    row.workloadRiskCount ? `담당자 중복 ${row.workloadRiskCount}건` : "",
-    row.progress != null ? `진행 ${row.progress}%` : "",
     row.start && row.end ? `${dateLabel(row.start)}-${dateLabel(row.end)}` : "",
     row.subtitle,
   ].filter(Boolean).join(" · ");
