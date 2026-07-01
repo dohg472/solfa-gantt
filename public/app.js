@@ -9,6 +9,7 @@ const COLOR_LEGEND = [
   { label: "편집", color: "#8B5CF6" },
   { label: "업로드", color: "#D84E4E" },
 ];
+const PAUSE_COLOR = "#8B949E";
 const PALETTE = ["#2F80ED", "#27AE60", "#D84E4E", "#8B5CF6", "#D8842F", "#00A7A7", "#D9468A"];
 const DETAIL_PRESETS = [
   { label: "촬영", value: "촬영", color: "#2F80ED" },
@@ -1589,7 +1590,7 @@ function buildRows(tasks) {
         statusReason: projectIssue?.reason || "",
         start: projectRange.start,
         end: projectRange.end,
-        color: "#D8842F",
+        color: projectColor(project),
         progress: projectProgress,
         health: projectHealth,
         collapsed: state.collapsedRows.has(projectId),
@@ -1691,6 +1692,10 @@ function projectSubtitle(tasks, progress, issue) {
     return [issue.reason, composition, count].filter(Boolean).join(" · ");
   }
   return [count, composition].filter(Boolean).join(" · ");
+}
+
+function projectColor(project) {
+  return project?.tasks?.some(isWonheePauseTask) ? PAUSE_COLOR : "#D8842F";
 }
 
 function displayTasksForProject(tasks) {
@@ -3038,6 +3043,7 @@ function rowMatchesRiskFilter(row, risk) {
 }
 
 function isAutoHiddenTask(task) {
+  if (isWonheePauseTask(task)) return false;
   const channel = String(task.channel || "").replace(/\s+/g, "");
   const detail = [task.detail, task.category, task.title].filter(Boolean).join(" ").replace(/\s+/g, "");
   return (
@@ -4304,11 +4310,21 @@ function detailPresetFor(value) {
 }
 
 function colorForDetail(value, fallback = PALETTE[0]) {
+  if (isWonheePauseLabel(value)) return PAUSE_COLOR;
   return detailPresetFor(value)?.color || fallback || PALETTE[0];
 }
 
 function normalizePresetText(value) {
   return String(value || "").replace(/\s+/g, "").toLowerCase();
+}
+
+function isWonheePauseTask(task) {
+  return isWonheePauseLabel([task?.channel, task?.project, task?.title, task?.detail, task?.category].filter(Boolean).join(" "));
+}
+
+function isWonheePauseLabel(value) {
+  const text = String(value || "");
+  return /(\uC6D0\uC774|\uB9AC\uC13C\uB290\s*\uC6D0\uC774)/i.test(text) && /(\uD734\uC7AC|\uD734\uBC29)/i.test(text);
 }
 
 function renderColorLegend() {

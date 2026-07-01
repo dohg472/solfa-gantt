@@ -33,6 +33,7 @@ const COLOR_LEGEND = {
   shoot: "#2F80ED",
   edit: "#8B5CF6",
   upload: "#D84E4E",
+  pause: "#8B949E",
   default: "#2F80ED",
 };
 
@@ -699,7 +700,7 @@ function pageToTask(page, schema, source) {
     description,
     start,
     end,
-    color: colorForGantt(detail || title),
+    color: colorForGantt([channel, project, detail, title].filter(Boolean).join(" ")),
     predecessorIds: [],
     successorIds: [],
     updatedAt: page.last_edited_time || "",
@@ -1130,6 +1131,7 @@ function resolveProjectAlias(channel, project) {
 }
 
 function isAutoHiddenTask(task) {
+  if (isWonheePauseTask(task)) return false;
   const channel = normalizeLabel(task.channel);
   const detail = normalizeLabel([task.detail, task.category, task.title, task.project].filter(Boolean).join(" "));
   return (
@@ -1221,10 +1223,20 @@ function inferDetail(title) {
 }
 
 function colorForGantt(label) {
+  if (isWonheePauseLabel(label)) return COLOR_LEGEND.pause;
   if (/업로드|릴리즈|게시|발행/i.test(label)) return COLOR_LEGEND.upload;
   if (/편집|가편/i.test(label)) return COLOR_LEGEND.edit;
   if (/촬영|재촬영/i.test(label)) return COLOR_LEGEND.shoot;
   return COLOR_LEGEND.default;
+}
+
+function isWonheePauseTask(task) {
+  return isWonheePauseLabel([task?.channel, task?.project, task?.title, task?.detail, task?.category].filter(Boolean).join(" "));
+}
+
+function isWonheePauseLabel(value) {
+  const text = String(value || "");
+  return /(\uC6D0\uC774|\uB9AC\uC13C\uB290\s*\uC6D0\uC774)/i.test(text) && /(\uD734\uC7AC|\uD734\uBC29)/i.test(text);
 }
 
 function normalizeLookupId(value) {
