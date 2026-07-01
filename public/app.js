@@ -4321,7 +4321,7 @@ function openRowContext(event, row, date = "") {
   event.stopPropagation();
 
   const rowTaskIds = taskIdsForRow(row);
-  const useSelection = state.selectedIds.size > 1 && rowTaskIds.some((id) => state.selectedIds.has(id));
+  const useSelection = row.kind === "task" && state.selectedIds.size > 1 && rowTaskIds.some((id) => state.selectedIds.has(id));
   const taskIds = useSelection ? [...state.selectedIds] : rowTaskIds;
   const restoreActions = useSelection ? [] : hiddenRestoreActionsForRow(row);
   const canUseEmptyChannel = !useSelection && row.kind === "channel" && row.emptyOnly;
@@ -4347,7 +4347,7 @@ function openRowContext(event, row, date = "") {
   render();
   showContextMenu(event.clientX, event.clientY, {
     summary: contextSummary(state.context) || state.context.summary || row.title,
-    canCreate: !useSelection && (Boolean(date) || row.emptyOnly),
+    canCreate: !useSelection && !row.hiddenOnly && (Boolean(date) || ["channel", "project"].includes(row.kind)),
     canEdit: !useSelection && row.kind === "task" && taskIds.length === 1,
     canRename: !useSelection && taskIds.length > 0 && ["channel", "project"].includes(row.kind) && !row.hiddenOnly,
     canMerge: canMergeContextProjects(useSelection ? "selection" : row.kind, taskIds),
@@ -4361,6 +4361,7 @@ function openRowContext(event, row, date = "") {
 function showContextMenu(x, y, options) {
   els.contextMenuSummary.textContent = options.summary || "";
   els.contextMenuSummary.hidden = !options.summary;
+  els.contextCreateButton.textContent = contextCreateActionLabel(options.kind);
   els.contextCreateButton.hidden = !options.canCreate;
   els.contextRenameButton.hidden = !options.canRename;
   els.contextMergeButton.hidden = !options.canMerge;
@@ -4427,14 +4428,40 @@ function contextActionLabel(kind, action) {
   return `일정 ${action}`;
 }
 
+function contextCreateActionLabel(kind) {
+  if (kind === "channel") return "프로젝트 만들기";
+  if (kind === "project") return "상세일정 만들기";
+  return "새 일정 만들기";
+}
+
 async function createTaskFromContext() {
   const context = state.context;
   if (!context) return;
   hideContextMenu();
+  const copy = contextCreateModalCopy(context);
   await createTaskFromSeed(contextTaskSeed(context), {
+    title: copy.title,
+    summary: copy.summary,
+  });
+}
+
+function contextCreateModalCopy(context) {
+  if (context?.kind === "channel") {
+    return {
+      title: "이 채널에 프로젝트 만들기",
+      summary: "선택한 채널을 기본값으로 새 프로젝트 일정을 만듭니다. 채널팀 플랜 원본은 건드리지 않고 간트_확인에 저장합니다.",
+    };
+  }
+  if (context?.kind === "project") {
+    return {
+      title: "이 프로젝트에 상세일정 만들기",
+      summary: "선택한 프로젝트를 기본값으로 새 상세일정을 만듭니다. 채널팀 플랜 원본은 건드리지 않고 간트_확인에 저장합니다.",
+    };
+  }
+  return {
     title: "이 위치에 새 일정 만들기",
     summary: "우클릭한 날짜와 행 정보를 기본값으로 새 일정을 만듭니다. 채널팀 플랜 원본은 건드리지 않고 간트_확인에 저장합니다.",
-  });
+  };
 }
 
 function contextTaskSeed(context) {
