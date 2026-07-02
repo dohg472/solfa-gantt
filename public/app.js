@@ -6498,6 +6498,7 @@ function startDrag(event, taskId, mode, rowTaskIds = []) {
 
 function startGroupDrag(event, row, mode) {
   if (event.button !== 0) return;
+  mode = normalizeShortGroupDragMode(event, row, mode);
   event.preventDefault();
   event.stopPropagation();
   const rowTaskIds = taskIdsForRow(row);
@@ -6552,6 +6553,23 @@ function startGroupDrag(event, row, mode) {
   };
   window.addEventListener("pointermove", moveDrag);
   window.addEventListener("pointerup", endDrag, { once: true });
+}
+
+function normalizeShortGroupDragMode(event, row, mode) {
+  if (!["resize-start", "resize-end"].includes(mode)) return mode;
+  if (!row || !["channel", "project"].includes(row.kind)) return mode;
+  const bar = event.target?.closest?.(".gantt-bar");
+  if (!bar?.classList?.contains("is-short-group-bar")) return mode;
+
+  const rect = bar.getBoundingClientRect();
+  if (!rect.width) return mode;
+  const edgeGrip = Math.min(7, Math.max(4, rect.width / 4));
+  const distanceFromStart = event.clientX - rect.left;
+  const distanceFromEnd = rect.right - event.clientX;
+
+  if (mode === "resize-start" && distanceFromStart > edgeGrip) return "move";
+  if (mode === "resize-end" && distanceFromEnd > edgeGrip) return "move";
+  return mode;
 }
 
 function groupDragTasks(drag, deltaDays) {
