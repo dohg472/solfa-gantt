@@ -530,44 +530,65 @@ function bindEvents() {
   });
 
   document.addEventListener("keydown", (event) => {
+    if (handleEscapeCancel(event)) return;
     if (handleUndoRedoShortcut(event)) return;
     if (handleKeyboardScheduleNudge(event)) return;
-    if (event.key === "Escape") {
-      event.preventDefault();
-      if (state.panMode) {
-        setPanMode(false);
-        return;
-      }
-      if (!els.inputModal.hidden) {
-        resolveInputModal(null);
-        return;
-      }
-      if (!els.impactModal.hidden) {
-        resolveImpactPreview(false);
-        return;
-      }
-      if (document.querySelector(".range-popover")) {
-        closeRangePopover();
-        return;
-      }
-      if (document.querySelector(".meta-popover")) {
-        closeMetaPopover();
-        return;
-      }
-      hideContextMenu();
-      closeFilterPanel();
-      closeEditor();
-      closeOperationPanel();
-      if (state.selectedIds.size || state.selectedId || state.selectionAnchorRowId) {
-        clearSelection();
-      }
-    }
   });
 
   els.taskForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     await saveEditor();
   });
+}
+
+function handleEscapeCancel(event) {
+  if (event.key !== "Escape") return false;
+  event.preventDefault();
+
+  if (state.panMode) {
+    setPanMode(false);
+    return true;
+  }
+  if (!els.inputModal.hidden) {
+    resolveInputModal(null);
+    return true;
+  }
+  if (!els.impactModal.hidden) {
+    resolveImpactPreview(false);
+    return true;
+  }
+  if (document.querySelector(".range-popover")) {
+    closeRangePopover();
+    return true;
+  }
+  if (document.querySelector(".meta-popover")) {
+    closeMetaPopover();
+    return true;
+  }
+
+  let shouldRender = false;
+  const hadEditor = state.editorOpen;
+  const hadSelection = Boolean(state.selectedIds.size || state.selectedId || state.selectionAnchorRowId);
+
+  hideContextMenu();
+  closeFilterPanel();
+  closeHiddenPanel();
+  closeReviewPanel();
+  closeActivityPanel();
+  closeOperationPanel();
+
+  if (hadSelection) {
+    clearSelection(false);
+    shouldRender = true;
+  } else if (hadEditor) {
+    state.editorOpen = false;
+    state.editorMode = "task";
+    state.editorRowId = "";
+    shouldRender = true;
+  }
+
+  if (shouldRender) render();
+  return true;
 }
 
 function handleKeyboardScheduleNudge(event) {
