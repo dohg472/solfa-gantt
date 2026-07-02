@@ -875,8 +875,9 @@ function pageToTask(page, schema, source) {
 }
 
 function splitEpisodeProjects(task) {
+  const rangePattern = /EP\.?\s*(\d+)\s*[~\-–—〜～]\s*EP\.?\s*(\d+)/i;
   const text = [task.project, task.title].filter(Boolean).join(" ");
-  const match = text.match(/EP\.?\s*(\d+)\s*[~-]\s*EP\.?\s*(\d+)/i);
+  const match = text.match(rangePattern);
   if (!match) return [task];
   const start = Number(match[1]);
   const end = Number(match[2]);
@@ -887,10 +888,16 @@ function splitEpisodeProjects(task) {
     return {
       ...task,
       id: `${task.id}:part-${index + 1}`,
-      project: text.replace(/EP\.?\s*\d+\s*[~-]\s*EP\.?\s*\d+/i, `EP.${episode}`).trim(),
-      title: task.title.replace(/EP\.?\s*\d+\s*[~-]\s*EP\.?\s*\d+/i, `EP.${episode}`).trim(),
+      project: replaceEpisodeRange(task.project, episode, rangePattern) || replaceEpisodeRange(task.title, episode, rangePattern) || task.project,
+      title: replaceEpisodeRange(task.title, episode, rangePattern) || replaceEpisodeRange(task.project, episode, rangePattern) || task.title,
     };
   });
+}
+
+function replaceEpisodeRange(value, episode, rangePattern) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  return text.replace(rangePattern, `EP.${episode}`).trim();
 }
 
 async function createTargetPage(env, task, schema) {
