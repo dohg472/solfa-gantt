@@ -339,6 +339,8 @@ function init() {
 }
 
 function bindEvents() {
+  bindEscapeCancelEvents();
+  document.addEventListener("pointerdown", () => window.focus?.(), { capture: true });
   els.refreshButton.addEventListener("click", () => loadTasks({ force: true }));
   els.newTaskButton.addEventListener("click", newTask);
   els.detailPresetButtons?.addEventListener("click", (event) => {
@@ -452,6 +454,11 @@ function bindEvents() {
   els.selectionUnlinkButton.addEventListener("click", unlinkSelectedTasks);
   els.selectionHideButton.addEventListener("click", hideSelectedTasks);
   els.selectionDeleteButton.addEventListener("click", deleteSelectedTask);
+  els.selectionClearButton.addEventListener("pointerdown", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    clearSelection();
+  });
   els.selectionClearButton.addEventListener("click", clearSelection);
   els.closeHiddenPanelButton.addEventListener("click", closeHiddenPanel);
   els.hiddenPanelBackdrop.addEventListener("click", closeHiddenPanel);
@@ -541,41 +548,83 @@ function bindEvents() {
   });
 }
 
+function bindEscapeCancelEvents() {
+  const onEscape = (event) => {
+    if (!handleEscapeCancel(event)) return;
+    event.stopPropagation();
+    event.stopImmediatePropagation?.();
+  };
+  window.addEventListener("keydown", onEscape, { capture: true });
+  window.addEventListener("keyup", onEscape, { capture: true });
+  document.addEventListener("keydown", onEscape, { capture: true });
+  document.addEventListener("keyup", onEscape, { capture: true });
+}
+
 function handleEscapeCancel(event) {
   if (event.key !== "Escape") return false;
-  event.preventDefault();
+  if (event.__solpaEscapeHandled) return true;
+  const markHandled = () => {
+    event.__solpaEscapeHandled = true;
+    event.preventDefault();
+  };
+
+  const hadContextMenu = !els.contextMenu.hidden;
+  const hadFilterPanel = !els.filterPanel.hidden;
+  const hadHiddenPanel = !els.hiddenPanel.hidden;
+  const hadReviewPanel = !els.reviewPanel.hidden;
+  const hadActivityPanel = !els.activityPanel.hidden;
+  const hadOperationPanel = !els.operationPanel.hidden;
+  const hadEditor = state.editorOpen;
+  const hadSelection = Boolean(state.selectedIds.size || state.selectedId || state.selectionAnchorRowId);
 
   if (state.panMode) {
+    markHandled();
     setPanMode(false);
     return true;
   }
   if (!els.inputModal.hidden) {
+    markHandled();
     resolveInputModal(null);
     return true;
   }
   if (!els.impactModal.hidden) {
+    markHandled();
     resolveImpactPreview(false);
     return true;
   }
   if (document.querySelector(".range-popover")) {
+    markHandled();
     closeRangePopover();
     return true;
   }
   if (document.querySelector(".meta-popover")) {
+    markHandled();
     closeMetaPopover();
     return true;
   }
 
-  let shouldRender = false;
-  const hadEditor = state.editorOpen;
-  const hadSelection = Boolean(state.selectedIds.size || state.selectedId || state.selectionAnchorRowId);
+  if (
+    !hadContextMenu &&
+    !hadFilterPanel &&
+    !hadHiddenPanel &&
+    !hadReviewPanel &&
+    !hadActivityPanel &&
+    !hadOperationPanel &&
+    !hadEditor &&
+    !hadSelection
+  ) {
+    return false;
+  }
 
-  hideContextMenu();
-  closeFilterPanel();
-  closeHiddenPanel();
-  closeReviewPanel();
-  closeActivityPanel();
-  closeOperationPanel();
+  markHandled();
+  let shouldRender = false;
+
+  if (hadContextMenu) hideContextMenu();
+  if (hadFilterPanel) closeFilterPanel();
+  if (hadHiddenPanel) closeHiddenPanel();
+  if (hadReviewPanel) closeReviewPanel();
+  if (hadActivityPanel) closeActivityPanel();
+  if (hadOperationPanel) closeOperationPanel();
 
   if (hadSelection) {
     clearSelection(false);
