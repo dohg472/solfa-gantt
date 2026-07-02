@@ -917,16 +917,6 @@ body.is-table-resizing * {
   font-weight: 650;
 }
 
-.task-row .task-health,
-.task-row .task-health.ok,
-.task-row .task-health.active,
-.task-row .task-health.warn,
-.task-row .task-health.bad,
-.task-row .task-health.muted {
-  background: #eeebe4;
-  color: var(--muted);
-}
-
 .task-progress-mini {
   display: none;
 }
