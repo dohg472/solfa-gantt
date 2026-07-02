@@ -1694,7 +1694,7 @@ function projectSubtitle(tasks, progress, issue) {
   const count = `${tasks.length}개 일정`;
   const composition = scheduleCompositionLabel(tasks);
   if (issue?.label) {
-    return [issue.reason, composition, count].filter(Boolean).join(" · ");
+    return [count, composition].filter(Boolean).join(" · ");
   }
   return [count, composition].filter(Boolean).join(" · ");
 }
