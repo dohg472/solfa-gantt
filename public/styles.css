@@ -909,6 +909,24 @@ body.is-table-resizing * {
   color: #6d716e;
 }
 
+.task-row .task-meta,
+.group-row.project.is-issue-upload-only .task-meta,
+.group-row.project.is-issue-missing-upload .task-meta,
+.group-row.project.is-issue-completed .task-meta {
+  color: var(--muted);
+  font-weight: 650;
+}
+
+.task-row .task-health,
+.task-row .task-health.ok,
+.task-row .task-health.active,
+.task-row .task-health.warn,
+.task-row .task-health.bad,
+.task-row .task-health.muted {
+  background: #eeebe4;
+  color: var(--muted);
+}
+
 .task-progress-mini {
   display: none;
 }
@@ -919,21 +937,6 @@ body.is-table-resizing * {
   border-radius: inherit;
   background: var(--task-color);
   opacity: 0.72;
-}
-
-.group-row.project.is-issue-upload-only .task-meta {
-  color: #9a5b16;
-  font-weight: 780;
-}
-
-.group-row.project.is-issue-missing-upload .task-meta {
-  color: #9a5b16;
-  font-weight: 780;
-}
-
-.group-row.project.is-issue-completed .task-meta {
-  color: var(--accent-strong);
-  font-weight: 780;
 }
 
 body[data-density="compact"] .task-row {
