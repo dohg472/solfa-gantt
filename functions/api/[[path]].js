@@ -871,33 +871,7 @@ function pageToTask(page, schema, source) {
     successorIds: [],
     updatedAt: page.last_edited_time || "",
   });
-  return splitEpisodeProjects(base);
-}
-
-function splitEpisodeProjects(task) {
-  const rangePattern = /EP\.?\s*(\d+)\s*[~\-–—〜～]\s*EP\.?\s*(\d+)/i;
-  const text = [task.project, task.title].filter(Boolean).join(" ");
-  const match = text.match(rangePattern);
-  if (!match) return [task];
-  const start = Number(match[1]);
-  const end = Number(match[2]);
-  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start || end - start > 8) return [task];
-  const count = end - start + 1;
-  return Array.from({ length: count }, (_, index) => {
-    const episode = start + index;
-    return {
-      ...task,
-      id: `${task.id}:part-${index + 1}`,
-      project: replaceEpisodeRange(task.project, episode, rangePattern) || replaceEpisodeRange(task.title, episode, rangePattern) || task.project,
-      title: replaceEpisodeRange(task.title, episode, rangePattern) || replaceEpisodeRange(task.project, episode, rangePattern) || task.title,
-    };
-  });
-}
-
-function replaceEpisodeRange(value, episode, rangePattern) {
-  const text = String(value || "").trim();
-  if (!text) return "";
-  return text.replace(rangePattern, `EP.${episode}`).trim();
+  return [base];
 }
 
 async function createTargetPage(env, task, schema) {
