@@ -1675,19 +1675,20 @@ body.is-dragging .gantt-bar.is-partial-selected {
 
 .gantt-bar.channel.is-short-group-bar .bar-handle,
 .gantt-bar.project.is-short-group-bar .bar-handle {
-  width: 16px;
+  width: 6px;
   background: transparent;
   box-shadow: none;
+  z-index: 10;
 }
 
 .gantt-bar.channel.is-short-group-bar .bar-handle.left,
 .gantt-bar.project.is-short-group-bar .bar-handle.left {
-  left: -2px;
+  left: 0;
 }
 
 .gantt-bar.channel.is-short-group-bar .bar-handle.right,
 .gantt-bar.project.is-short-group-bar .bar-handle.right {
-  right: -2px;
+  right: 0;
 }
 
 .gantt-bar.is-clipped-start .bar-handle.left,
@@ -1740,7 +1741,8 @@ body.is-dragging .gantt-bar.task .bar-handle::after {
 }
 
 .gantt-bar.is-short-group-bar .bar-move {
-  inset: 0 2px;
+  inset: 0 7px;
+  z-index: 9;
 }
 
 .bar-move:active {
