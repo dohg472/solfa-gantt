@@ -1765,12 +1765,18 @@ function uniqueRestoreActions(actions) {
 }
 
 function projectSubtitle(tasks, progress, issue) {
-  const count = `${tasks.length}개 일정`;
-  const composition = scheduleCompositionLabel(tasks);
-  if (issue?.label) {
-    return [count, composition].filter(Boolean).join(" · ");
-  }
-  return [count, composition].filter(Boolean).join(" · ");
+  return projectScheduleImbalanceLabel(tasks);
+}
+
+function projectScheduleImbalanceLabel(tasks) {
+  const list = tasks || [];
+  const shootCount = list.filter(isShootTask).length;
+  const uploadCount = list.filter(isUploadTask).length;
+  if (shootCount === uploadCount) return "";
+  return [
+    shootCount ? `촬영 ${shootCount}` : "",
+    uploadCount ? `업로드 ${uploadCount}` : "",
+  ].filter(Boolean).join(" · ");
 }
 
 function projectColor(project) {

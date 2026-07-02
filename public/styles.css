@@ -703,7 +703,7 @@ body.is-table-resizing * {
 }
 
 .group-row.project.is-leaf {
-  background: #eef0f2;
+  background: #f4efe5;
 }
 
 .group-row.project.is-issue-upload-only {
@@ -733,7 +733,7 @@ body.is-table-resizing * {
 .group-row.project.is-leaf:hover,
 .group-row.project.is-leaf.is-selected,
 .group-row.project.is-leaf.is-partial-selected {
-  background: #eef0f2;
+  background: #f4efe5;
 }
 
 .group-row.is-leaf .group-caret {
