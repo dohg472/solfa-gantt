@@ -1625,16 +1625,11 @@ function buildRows(tasks) {
     const channelId = `channel:${channel.name}`;
     const channelProgress = progressForTasks(channel.tasks);
     const channelHealth = healthForTasks(channel.tasks);
-    const channelComposition = scheduleCompositionLabel(channel.tasks);
     rows.push({
       id: channelId,
       kind: "channel",
       title: channel.name,
-      subtitle: channel.hiddenOnly
-        ? channel.hiddenLabel || `${channel.hiddenTaskIds?.length || 0}개 숨김 일정`
-        : channel.emptyOnly
-          ? "표시할 일정 없음"
-        : [`${channel.projects.length}개 프로젝트`, `${channel.tasks.length}개 일정`, channelComposition].filter(Boolean).join(" · "),
+      subtitle: `${channel.projects.length}개 프로젝트`,
       start: channel.range.start,
       end: channel.range.end,
       color: "#176B65",
