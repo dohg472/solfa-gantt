@@ -533,6 +533,7 @@ function bindEvents() {
     if (handleUndoRedoShortcut(event)) return;
     if (handleKeyboardScheduleNudge(event)) return;
     if (event.key === "Escape") {
+      event.preventDefault();
       if (state.panMode) {
         setPanMode(false);
         return;
@@ -557,6 +558,9 @@ function bindEvents() {
       closeFilterPanel();
       closeEditor();
       closeOperationPanel();
+      if (state.selectedIds.size || state.selectedId || state.selectionAnchorRowId) {
+        clearSelection();
+      }
     }
   });
 
