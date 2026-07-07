@@ -1167,6 +1167,7 @@ function normalizeTaskPatch(body) {
     channel: String(patch.channel || "미지정 채널").trim(),
     project,
     detail: String(patch.detail || "상세일정").trim(),
+    rowType: String(patch.rowType || "").trim(),
     description: String(patch.description || "").trim(),
     start: toDateOnly(patch.start) || todayString(),
     end: toDateOnly(patch.end) || toDateOnly(patch.start) || todayString(),

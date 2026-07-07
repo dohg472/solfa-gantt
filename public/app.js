@@ -1485,9 +1485,10 @@ function barTop(index, kind, rowHeight) {
 
 function buildRows(tasks) {
   const scheduleTasks = tasks.filter((task) => isScheduleTask(task) && !isAutoHiddenTask(task));
+  const projectMetaTasks = tasks.filter((task) => isProjectMetaTask(task) && !isAutoHiddenTask(task));
   const channels = new Map();
 
-  for (const task of scheduleTasks) {
+  function ensureTaskProjectGroup(task) {
     const channelName = task.channel || "미지정 채널";
     const projectName = task.project || task.title || "새 프로젝트";
     const resolvedProjectName = resolveProjectAliasName(channelName, projectName);
@@ -1502,7 +1503,16 @@ function buildRows(tasks) {
     }
     const group = channel.projects.get(resolvedProjectKey);
     if (resolvedProjectName !== projectName) group.aliasName = resolvedProjectName;
-    channel.projects.get(resolvedProjectKey).tasks.push(task);
+    return channel.projects.get(resolvedProjectKey);
+  }
+
+  for (const task of scheduleTasks) {
+    ensureTaskProjectGroup(task).tasks.push(task);
+  }
+
+  for (const task of projectMetaTasks) {
+    const group = ensureTaskProjectGroup(task);
+    group.metaTasks = [...(group.metaTasks || []), task];
   }
 
   for (const stub of state.channelStubs || []) {
@@ -1556,20 +1566,24 @@ function buildRows(tasks) {
         .filter((project) => shouldShowProjectInCurrentView(project.tasks, project, sourceProjects))
         .map((project) => {
           const visibleTasks = visibleTasksForProject(project.tasks);
-          if (!visibleTasks.length) return null;
+          const visibleMetaTasks = project.metaTasks || [];
+          if (!visibleTasks.length && !visibleMetaTasks.length) return null;
+          const rangeTasks = visibleTasks.length ? visibleTasks : visibleMetaTasks;
           return {
             ...project,
             tasks: visibleTasks,
+            metaTasks: visibleMetaTasks,
             displayTasks: displayTasksForProject(visibleTasks),
             name: pauseProjectDisplayName(visibleTasks) || project.aliasName || displayProjectName(project.tasks, project.name),
-            range: rangeOf(visibleTasks),
+            range: rangeOf(rangeTasks),
           };
         })
         .filter(Boolean)
         .sort((a, b) => compareDate(a.range.start, b.range.start) || compareText(a.name, b.name));
       projects = applyManualRowOrder(projects, (project) => `project:${channel.name}:${project.key}`);
       const visibleTasks = projects.flatMap((project) => project.tasks);
-      if (!visibleTasks.length) {
+      const visibleRangeTasks = projects.flatMap((project) => project.tasks.length ? project.tasks : project.metaTasks || []);
+      if (!visibleRangeTasks.length) {
         const hiddenDefaultTasks = [...completedProjects, ...reviewBacklogProjects].flatMap((project) => project.tasks);
         const emptyPinnedChannel = Boolean(channel.pinnedEmpty && !channel.hiddenTaskIds?.length && !hiddenDefaultTasks.length);
         if (emptyPinnedChannel) {
@@ -1608,8 +1622,8 @@ function buildRows(tasks) {
         };
       }
       const channelId = `channel:${channel.name}`;
-      const naturalRange = rangeOf(visibleTasks);
-      return { ...channel, projects, tasks: visibleTasks, range: groupRangeForRow({ id: channelId, kind: "channel" }, naturalRange) };
+      const naturalRange = rangeOf(visibleRangeTasks);
+      return { ...channel, projects, tasks: visibleTasks, rangeTasks: visibleRangeTasks, range: groupRangeForRow({ id: channelId, kind: "channel" }, naturalRange) };
     })
     .filter(Boolean)
     .sort((a, b) =>
@@ -1636,7 +1650,7 @@ function buildRows(tasks) {
       progress: channelProgress,
       health: channelHealth,
       collapsed: state.collapsedRows.has(channelId),
-      taskIds: channel.tasks.length ? channel.tasks.map((task) => task.id) : channel.hiddenTaskIds || [],
+      taskIds: channel.tasks.length ? channel.tasks.map((task) => task.id) : (channel.rangeTasks || []).map((task) => task.id).concat(channel.hiddenTaskIds || []),
       hiddenOnly: Boolean(channel.hiddenOnly),
       emptyOnly: Boolean(channel.emptyOnly),
       restoreActions: channel.restoreActions || [],
@@ -1652,6 +1666,7 @@ function buildRows(tasks) {
       const projectStatus = projectVisibilityState(project.tasks);
       const projectRange = groupRangeForRow({ id: projectId, kind: "project" }, project.range);
       const projectDisplayTasks = project.displayTasks || project.tasks;
+      const projectRowTaskIds = project.tasks.length ? project.tasks.map((task) => task.id) : (project.metaTasks || []).map((task) => task.id);
       rows.push({
         id: projectId,
         kind: "project",
@@ -1667,11 +1682,12 @@ function buildRows(tasks) {
         collapsed: state.collapsedRows.has(projectId),
         isPause: isPauseProject(project),
         leafOnly: isPauseProject(project),
-        taskIds: project.tasks.map((task) => task.id),
+        taskIds: projectRowTaskIds,
+        projectOnly: !project.tasks.length && Boolean(project.metaTasks?.length),
         issue: projectIssue?.kind || "",
       });
 
-      if (state.collapsedRows.has(projectId) || isPauseProject(project)) continue;
+      if (state.collapsedRows.has(projectId) || isPauseProject(project) || !project.tasks.length) continue;
 
       (project.displayTasks || project.tasks)
         .slice()
@@ -2486,6 +2502,7 @@ function ensureProjectGroup(projects, key, name) {
     if (matchingKey === targetKey) continue;
     const match = projects.get(matchingKey);
     projects.get(targetKey).tasks.push(...(match?.tasks || []));
+    projects.get(targetKey).metaTasks = [...(projects.get(targetKey).metaTasks || []), ...(match?.metaTasks || [])];
     projects.delete(matchingKey);
   }
 
@@ -2514,6 +2531,7 @@ function mergeSimilarProjects(projects) {
         const target = projects.get(targetKey);
         const source = projects.get(sourceKey);
         target.tasks.push(...(source?.tasks || []));
+        target.metaTasks = [...(target.metaTasks || []), ...(source?.metaTasks || [])];
         projects.delete(sourceKey);
         merged = true;
         break;
@@ -2536,6 +2554,7 @@ function mergeUploadOnlyProjects(projects) {
     if (!candidate) continue;
     const [, targetProject] = candidate;
     targetProject.tasks.push(...uploadProject.tasks);
+    targetProject.metaTasks = [...(targetProject.metaTasks || []), ...(uploadProject.metaTasks || [])];
     projects.delete(uploadKey);
   }
 }
@@ -4734,6 +4753,10 @@ async function createTaskFromContext() {
   const context = state.context;
   if (!context) return;
   hideContextMenu();
+  if (context.kind === "channel") {
+    await createProjectFromContext(context);
+    return;
+  }
   const copy = contextCreateModalCopy(context);
   await createTaskFromSeed(contextTaskSeed(context), {
     title: copy.title,
@@ -4757,6 +4780,24 @@ function contextCreateModalCopy(context) {
   return {
     title: "이 위치에 새 일정 만들기",
     summary: "우클릭한 날짜와 행 정보를 기본값으로 새 일정을 만듭니다. 채널팀 플랜 원본은 건드리지 않고 간트_확인에 저장합니다.",
+  };
+}
+
+async function createProjectFromContext(context) {
+  const seed = contextProjectSeed(context);
+  const input = await openCreateProjectModal(seed);
+  if (!input) return;
+  await createProject(input);
+}
+
+function contextProjectSeed(context) {
+  const start = context.date || todayString();
+  return {
+    channel: context.channel || (context.kind === "channel" ? context.title : "") || "새 채널",
+    project: "새 프로젝트",
+    description: "",
+    start,
+    end: start,
   };
 }
 
@@ -6170,6 +6211,21 @@ async function confirmCreateTaskPreview(task) {
     }],
     confirmText: "생성",
     badge: "생성 확인",
+  });
+}
+
+async function confirmCreateProjectPreview(project) {
+  return openActionPreview({
+    title: "새 프로젝트 생성 확인",
+    summary: `"${project.channel}" 채널에 "${project.project}" 프로젝트만 만듭니다. 상세일정은 자동으로 생성하지 않습니다.`,
+    items: [{
+      title: project.project || "새 프로젝트",
+      meta: project.description || "프로젝트",
+      range: dateRangeLabel(project),
+      result: "프로젝트 생성",
+    }],
+    confirmText: "생성",
+    badge: "프로젝트 생성",
   });
 }
 
@@ -10567,6 +10623,40 @@ async function createTaskFromSeed(seed, copy = {}) {
   await createTask(input);
 }
 
+async function openCreateProjectModal(seed) {
+  const start = seed.start || todayString();
+  const end = compareDate(seed.end || start, start) < 0 ? start : seed.end || start;
+  const input = await openInputModal({
+    title: "이 채널에 프로젝트 만들기",
+    summary: `"${seed.channel || "새 채널"}" 채널에 프로젝트만 만듭니다. 상세일정은 자동으로 만들지 않습니다.`,
+    badge: "프로젝트",
+    confirmText: "프로젝트 생성",
+    fields: [
+      { name: "channel", label: "채널", value: seed.channel || "", placeholder: "채널명" },
+      { name: "project", label: "프로젝트", value: seed.project || "", placeholder: "프로젝트명" },
+      { name: "description", label: "내용", value: seed.description || "", type: "textarea", required: false, placeholder: "프로젝트 메모" },
+      { name: "start", label: "시작", value: start, type: "date" },
+      { name: "end", label: "종료", value: end, type: "date" },
+    ],
+  });
+  if (!input) return null;
+  const normalizedStart = input.start || start;
+  const normalizedEnd = compareDate(input.end || normalizedStart, normalizedStart) < 0 ? normalizedStart : input.end || normalizedStart;
+  return {
+    title: input.project || "새 프로젝트",
+    channel: input.channel || seed.channel || "새 채널",
+    project: input.project || "새 프로젝트",
+    detail: "프로젝트",
+    rowType: "프로젝트",
+    description: input.description || "",
+    start: normalizedStart,
+    end: normalizedEnd,
+    status: "입력",
+    assignee: "",
+    color: "#D8842F",
+  };
+}
+
 async function openCreateTaskModal(seed, copy = {}) {
   const start = seed.start || todayString();
   const end = compareDate(seed.end || start, start) < 0 ? start : seed.end || start;
@@ -10609,6 +10699,57 @@ async function openCreateTaskModal(seed, copy = {}) {
     assignee: input.assignee || "",
     color: input.color || seed.color || colorForDetail(input.detail || seed.detail, PALETTE[0]),
   };
+}
+
+async function createProject(seed) {
+  const base = {
+    title: seed.title || seed.project || "새 프로젝트",
+    channel: seed.channel || "새 채널",
+    project: seed.project || seed.title || "새 프로젝트",
+    detail: "프로젝트",
+    rowType: "프로젝트",
+    description: seed.description || "",
+    start: seed.start || todayString(),
+    end: compareDate(seed.end || seed.start || todayString(), seed.start || todayString()) < 0 ? seed.start || todayString() : seed.end || seed.start || todayString(),
+    status: "입력",
+    assignee: "",
+    color: seed.color || "#D8842F",
+  };
+  if (!(await confirmCreateProjectPreview(base))) return;
+
+  try {
+    const response = await fetch(apiUrl("/api/tasks"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(base),
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || "프로젝트를 만들지 못했습니다.");
+    const created = { ...result.task, ...base, id: result.task.id };
+    state.tasks.push(created);
+    const channelId = `channel:${created.channel}`;
+    const projectRowId = `project:${created.channel}:${canonicalProjectKey(resolveProjectAliasName(created.channel, created.project))}`;
+    state.collapsedRows.delete(channelId);
+    state.collapsedRows.delete(projectRowId);
+    state.selectedId = "";
+    state.selectedIds = new Set([created.id]);
+    state.selectionAnchorRowId = projectRowId;
+    state.editorMode = "group";
+    state.editorRowId = projectRowId;
+    state.editorOpen = true;
+    pushUndo(`"${created.project}" 프로젝트 생성`, async () => {
+      const response = await fetch(apiUrl(`/api/tasks/${encodeURIComponent(created.id)}`), { method: "DELETE" });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "새 프로젝트를 되돌리지 못했습니다.");
+      notifyDataChanged("undo-create-project");
+      await loadTasks();
+    });
+    render();
+    refreshAfterLocalMutation("create-project");
+    showToast("간트_확인에 프로젝트만 만들었습니다.");
+  } catch (error) {
+    showToast(error.message);
+  }
 }
 
 function colorInputOptions() {
