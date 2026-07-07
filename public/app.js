@@ -3702,7 +3702,11 @@ function renderRows(rows, criticalTaskIds) {
     });
     editableName?.addEventListener("dblclick", (event) => {
       const row = state.rows.find((item) => item.id === element.dataset.rowId);
-      if (row) startInlineNameEdit(event, row);
+      if (row) {
+        event.preventDefault();
+        event.stopPropagation();
+        openGroupEditor(row);
+      }
     });
     const editableRange = element.querySelector("[data-range-edit]");
     editableRange?.addEventListener("click", (event) => {
@@ -3710,7 +3714,11 @@ function renderRows(rows, criticalTaskIds) {
     });
     editableRange?.addEventListener("dblclick", (event) => {
       const row = state.rows.find((item) => item.id === element.dataset.rowId);
-      if (row) startInlineRangeEdit(event, row);
+      if (row) {
+        event.preventDefault();
+        event.stopPropagation();
+        openGroupEditor(row);
+      }
     });
     element.addEventListener("pointerdown", (event) => {
       const row = state.rows.find((item) => item.id === element.dataset.rowId);
@@ -4201,7 +4209,7 @@ function renderBars(rows, dayWidth, criticalTaskIds) {
         event.stopPropagation();
       });
       bar.addEventListener("dblclick", (event) => {
-        if (event.target.dataset.mode) return;
+        event.preventDefault();
         openGroupEditor(row);
         event.stopPropagation();
       });
