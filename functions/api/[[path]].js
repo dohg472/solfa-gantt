@@ -241,10 +241,13 @@ async function getTasksPayload(env, request, options = {}) {
     .filter((task) => !store.writeMap?.[task.id])
     .map((task) => ({ ...task, syncMode: "read-only" }));
 
-  const targetTasks = targetTasksRaw.map((task) => ({
-    ...task,
-    syncMode: task.originId ? "target-copy" : "target",
-  }));
+  const sourceTasksForDedupe = sourceTasks.map(normalizeTask).filter(isGanttScheduleTask);
+  const targetTasks = targetTasksRaw
+    .map((task) => ({
+      ...task,
+      syncMode: task.originId ? "target-copy" : "target",
+    }))
+    .filter((task) => !isTargetTaskSupersededBySource(task, sourceTasksForDedupe));
 
   const tasks = [...sourceTasks, ...targetTasks]
     .map(normalizeTask)
@@ -1265,6 +1268,46 @@ function isHiddenProjectName(hiddenProjects, task) {
     const hiddenKeys = [item.project, ...(item.projects || [])].map(normalizeProjectName).filter(Boolean);
     return hiddenKeys.some((hiddenKey) => projectKeys.some((key) => projectKeyMatches(hiddenKey, key)));
   });
+}
+
+function isTargetTaskSupersededBySource(targetTask, sourceTasks) {
+  if (!targetTask || targetTask.originId) return false;
+  const target = normalizeTask(targetTask);
+  if (!isGanttScheduleTask(target) && !isProjectPlaceholderTask(target)) return false;
+  return (sourceTasks || []).some((source) => isSameProductionSchedule(source, target));
+}
+
+function isSameProductionSchedule(source, target) {
+  if (!source || !target) return false;
+  if (normalizeChannelName(source.channel) !== normalizeChannelName(target.channel)) return false;
+  if (!projectKeyMatches(projectKeyForProductionDedupe(source), projectKeyForProductionDedupe(target))) return false;
+  if (isProjectPlaceholderTask(target)) return true;
+  const sourceKind = scheduleKindKey(source);
+  const targetKind = scheduleKindKey(target);
+  if (!sourceKind || !targetKind || sourceKind !== targetKind) return false;
+  if (sourceKind === "other" && normalizeProjectName(source.detail || source.category || source.title) !== normalizeProjectName(target.detail || target.category || target.title)) {
+    return false;
+  }
+  return true;
+}
+
+function isProjectPlaceholderTask(task) {
+  const rowType = normalizeProjectName(task.rowType || "");
+  const detail = normalizeProjectName(task.detail || task.category || "");
+  return rowType === normalizeProjectName("\ud504\ub85c\uc81d\ud2b8") || detail === normalizeProjectName("\ud504\ub85c\uc81d\ud2b8");
+}
+
+function projectKeyForProductionDedupe(task) {
+  return normalizeProjectName(resolveProjectAlias(task.channel, task.project || task.title));
+}
+
+function scheduleKindKey(task) {
+  const text = [task.detail, task.category, task.title, task.project].filter(Boolean).join(" ");
+  if (/\uc5c5\ub85c\ub4dc|\ub9b4\ub9ac\uc988|\uac8c\uc2dc|\ubc1c\ud589|upload|release/i.test(text)) return "upload";
+  if (/\ucd2c\uc601|shoot|filming|production/i.test(text)) return "shoot";
+  if (/\ud3b8\uc9d1|\uac00\ud3b8|edit/i.test(text)) return "edit";
+  const detail = normalizeProjectName(task.detail || task.category || "");
+  return detail ? `other:${detail}` : "other";
 }
 
 function projectKeysForTask(task) {
