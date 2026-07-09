@@ -36,6 +36,17 @@ const COLOR_LEGEND = {
   pause: "#8B949E",
   default: "#2F80ED",
 };
+const DEFAULT_PROJECT_ALIAS_RULES = [
+  {
+    channel: "\uc874\ubc15",
+    target: "\uc5d0\uc774\ud2f0\uc988 \uc2a4\ubab0\ud1a1",
+    aliases: ["\uc5d0\uc774\ud2f0\uc988 \ud64d\uc911", "\uc5d0\uc774\ud2f0\uc988 \uc2a4\ubab0\ud1a0\ud06c", "ATEEZ Hongjoong", "\ud64d\uc911"],
+    contains: [
+      ["\uc5d0\uc774\ud2f0\uc988", "\ud64d\uc911"],
+      ["ateez", "hongjoong"],
+    ],
+  },
+];
 
 export async function onRequest(context) {
   try {
@@ -1299,7 +1310,26 @@ function projectCoreKey(value) {
 }
 
 function resolveProjectAlias(channel, project) {
-  return canonicalProjectTitle(project);
+  const resolved = canonicalProjectTitle(project);
+  return defaultProjectAliasName(channel, resolved) || resolved;
+}
+
+function defaultProjectAliasName(channel, projectName) {
+  const channelKey = normalizeChannelName(channel);
+  const projectKey = normalizeProjectName(projectName);
+  if (!channelKey || !projectKey) return "";
+
+  for (const rule of DEFAULT_PROJECT_ALIAS_RULES) {
+    if (normalizeChannelName(rule.channel) !== channelKey) continue;
+    const targetKey = normalizeProjectName(rule.target);
+    const aliasKeys = (rule.aliases || []).map(normalizeProjectName);
+    const containsMatch = (rule.contains || []).some((tokens) => tokens.every((token) => projectKey.includes(normalizeProjectName(token))));
+    if (projectKey === targetKey || aliasKeys.includes(projectKey) || containsMatch) {
+      return rule.target;
+    }
+  }
+
+  return "";
 }
 
 function canonicalProjectTitle(value) {

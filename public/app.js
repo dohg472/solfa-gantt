@@ -42,6 +42,17 @@ const PINNED_CHANNELS = [
   { name: "ODG" },
   { name: "film94" },
 ];
+const DEFAULT_PROJECT_ALIAS_RULES = [
+  {
+    channel: "존박",
+    target: "에이티즈 스몰톡",
+    aliases: ["에이티즈 홍중", "에이티즈 스몰토크", "ATEEZ Hongjoong", "홍중"],
+    contains: [
+      ["에이티즈", "홍중"],
+      ["ateez", "hongjoong"],
+    ],
+  },
+];
 
 const state = {
   tasks: [],
@@ -858,9 +869,12 @@ function groupRangeForRow(row, fallback) {
   if (!row || !["channel", "project"].includes(row.kind)) return fallback;
   const override = state.groupRanges?.[row.id];
   if (!override?.start || !override?.end) return fallback;
+  const fallbackStart = fallback?.start || override.start;
+  const fallbackEnd = fallback?.end || fallbackStart;
+  const overrideEnd = compareDate(override.end, override.start) < 0 ? override.start : override.end;
   return {
-    start: override.start,
-    end: compareDate(override.end, override.start) < 0 ? override.start : override.end,
+    start: compareDate(override.start, fallbackStart) < 0 ? override.start : fallbackStart,
+    end: compareDate(overrideEnd, fallbackEnd) > 0 ? overrideEnd : fallbackEnd,
   };
 }
 
@@ -2474,6 +2488,11 @@ function resolveProjectAliasName(channel, projectName) {
   const visited = new Set();
 
   for (let index = 0; index < 8; index += 1) {
+    const defaultAlias = defaultProjectAliasName(channel, resolved);
+    if (defaultAlias && defaultAlias !== resolved) {
+      resolved = defaultAlias;
+    }
+
     const key = `${normalizeChannelName(channel)}:${canonicalProjectKey(resolved)}`;
     if (visited.has(key)) return resolved;
     visited.add(key);
@@ -2486,6 +2505,24 @@ function resolveProjectAliasName(channel, projectName) {
   }
 
   return resolved;
+}
+
+function defaultProjectAliasName(channel, projectName) {
+  const channelKey = normalizeChannelName(channel);
+  const projectKey = canonicalProjectKey(projectName);
+  if (!channelKey || !projectKey) return "";
+
+  for (const rule of DEFAULT_PROJECT_ALIAS_RULES) {
+    if (normalizeChannelName(rule.channel) !== channelKey) continue;
+    const targetKey = canonicalProjectKey(rule.target);
+    const aliasKeys = (rule.aliases || []).map(canonicalProjectKey);
+    const containsMatch = (rule.contains || []).some((tokens) => tokens.every((token) => projectKey.includes(canonicalProjectKey(token))));
+    if (projectKey === targetKey || aliasKeys.includes(projectKey) || containsMatch) {
+      return rule.target;
+    }
+  }
+
+  return "";
 }
 
 function ensureProjectGroup(projects, key, name) {
