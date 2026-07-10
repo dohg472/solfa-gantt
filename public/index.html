@@ -4,8 +4,8 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>솔파 간트</title>
-    <link rel="stylesheet" href="/styles.css?v=20260707-readability-pass" />
-    <script src="/app.js?v=20260709-project-alias-rules" defer></script>
+    <link rel="stylesheet" href="/styles.css?v=20260710-productivity-pass" />
+    <script src="/app.js?v=20260710-productivity-pass" defer></script>
   </head>
   <body>
     <div class="app">
@@ -18,44 +18,61 @@
           </div>
         </div>
         <div class="toolbar" role="toolbar" aria-label="간트 도구">
-          <label class="search">
-            <span aria-hidden="true">⌕</span>
-            <input id="searchInput" type="search" placeholder="검색" autocomplete="off" />
-            <button id="searchPrevButton" type="button" title="이전 검색 결과" aria-label="이전 검색 결과">‹</button>
-            <button id="searchNextButton" type="button" title="다음 검색 결과" aria-label="다음 검색 결과">›</button>
-          </label>
-          <div class="view-mode" aria-label="작업 보기">
-            <button class="view-mode-button is-active" data-view-mode="all" type="button">전체</button>
-            <button class="view-mode-button" data-view-mode="ops" type="button">운영</button>
-            <button class="view-mode-button" data-view-mode="review" type="button">검토</button>
-            <button class="view-mode-button" data-view-mode="shoot" type="button">촬영</button>
-            <button class="view-mode-button" data-view-mode="upload" type="button">업로드</button>
+          <div class="toolbar-primary">
+            <label class="search">
+              <span aria-hidden="true">⌕</span>
+              <input id="searchInput" type="search" placeholder="검색" autocomplete="off" />
+              <button id="searchPrevButton" type="button" title="이전 검색 결과" aria-label="이전 검색 결과">‹</button>
+              <button id="searchNextButton" type="button" title="다음 검색 결과" aria-label="다음 검색 결과">›</button>
+            </label>
+            <div class="view-mode" aria-label="작업 보기">
+              <button class="view-mode-button is-active" data-view-mode="all" type="button">전체</button>
+              <button class="view-mode-button" data-view-mode="ops" type="button">운영</button>
+              <button class="view-mode-button" data-view-mode="review" type="button">검토</button>
+              <button class="view-mode-button" data-view-mode="shoot" type="button">촬영</button>
+              <button class="view-mode-button" data-view-mode="upload" type="button">업로드</button>
+            </div>
+            <div class="segment" aria-label="보기 범위">
+              <button class="segment-button" data-zoom="day" type="button">일</button>
+              <button class="segment-button is-active" data-zoom="week" type="button">주</button>
+              <button class="segment-button" data-zoom="month" type="button">월</button>
+            </div>
+            <button id="filterButton" class="ghost-button compact-button" type="button">필터</button>
+            <button id="todayButton" class="ghost-button compact-button" type="button">오늘</button>
+            <button id="hiddenManagerButton" class="ghost-button compact-button" type="button">숨김</button>
+            <button id="undoButton" class="icon-button" title="실행 취소" aria-label="실행 취소" type="button" disabled>↶</button>
+            <button id="redoButton" class="icon-button" title="다시 실행" aria-label="다시 실행" type="button" disabled>↷</button>
+            <button id="refreshButton" class="icon-button" title="새로고침" aria-label="새로고침" type="button">↻</button>
+            <div id="moreTools" class="toolbar-more">
+              <button id="moreToolsButton" class="ghost-button compact-button" type="button" aria-expanded="false" aria-controls="moreToolsPanel">더보기</button>
+              <div id="moreToolsPanel" class="toolbar-more-panel" hidden>
+                <section class="toolbar-more-section" aria-label="화면 설정">
+                  <span class="toolbar-more-label">화면</span>
+                  <div class="toolbar-more-grid">
+                    <button id="panModeButton" class="toggle-button" type="button" title="차트를 잡고 화면 이동">이동</button>
+                    <button id="collapseAllButton" class="ghost-button compact-button" data-close-more="true" type="button">접기</button>
+                    <button id="expandAllButton" class="ghost-button compact-button" data-close-more="true" type="button">펼치기</button>
+                    <button id="densityButton" class="toggle-button is-active" type="button">촘촘</button>
+                    <button id="dependencyToggleButton" class="toggle-button is-active" type="button">연결선</button>
+                    <button id="rescheduleToggleButton" class="toggle-button is-active" type="button">후속</button>
+                    <button id="criticalToggleButton" class="toggle-button is-active" type="button">핵심</button>
+                    <button id="baselineToggleButton" class="toggle-button" type="button">기준선</button>
+                    <button id="completedToggleButton" class="toggle-button" type="button">완료</button>
+                  </div>
+                </section>
+                <section class="toolbar-more-section" aria-label="관리 도구">
+                  <span class="toolbar-more-label">관리</span>
+                  <div class="toolbar-more-grid management">
+                    <button id="reviewButton" class="ghost-button compact-button" data-close-more="true" type="button">검토</button>
+                    <button id="activityButton" class="ghost-button compact-button" data-close-more="true" type="button">기록</button>
+                    <button id="operationButton" class="ghost-button compact-button" data-close-more="true" type="button">운영</button>
+                    <button id="changeRequestButton" class="ghost-button compact-button" data-close-more="true" type="button">수정요청</button>
+                  </div>
+                </section>
+              </div>
+            </div>
+            <button id="newTaskButton" class="primary-button" type="button">새 작업</button>
           </div>
-          <div class="segment" aria-label="보기 범위">
-            <button class="segment-button" data-zoom="day" type="button">일</button>
-            <button class="segment-button is-active" data-zoom="week" type="button">주</button>
-            <button class="segment-button" data-zoom="month" type="button">월</button>
-          </div>
-          <button id="panModeButton" class="toggle-button" type="button" title="차트를 잡고 화면 이동">이동</button>
-          <button id="collapseAllButton" class="ghost-button compact-button" type="button">접기</button>
-          <button id="expandAllButton" class="ghost-button compact-button" type="button">펼치기</button>
-          <button id="densityButton" class="toggle-button is-active" type="button">촘촘</button>
-          <button id="dependencyToggleButton" class="toggle-button is-active" type="button">연결선</button>
-          <button id="rescheduleToggleButton" class="toggle-button is-active" type="button">후속</button>
-          <button id="criticalToggleButton" class="toggle-button is-active" type="button">핵심</button>
-          <button id="baselineToggleButton" class="toggle-button" type="button">기준선</button>
-          <button id="completedToggleButton" class="toggle-button" type="button">완료</button>
-          <button id="filterButton" class="ghost-button compact-button" type="button">필터</button>
-          <button id="todayButton" class="ghost-button" type="button">오늘</button>
-          <button id="reviewButton" class="ghost-button compact-button" type="button">검토</button>
-          <button id="hiddenManagerButton" class="ghost-button compact-button" type="button">숨김</button>
-          <button id="activityButton" class="ghost-button compact-button" type="button">기록</button>
-          <button id="operationButton" class="ghost-button compact-button" type="button">운영</button>
-          <button id="changeRequestButton" class="ghost-button compact-button" type="button">수정요청</button>
-          <button id="undoButton" class="icon-button" title="실행 취소" aria-label="실행 취소" type="button" disabled>↶</button>
-          <button id="redoButton" class="icon-button" title="다시 실행" aria-label="다시 실행" type="button" disabled>↷</button>
-          <button id="refreshButton" class="icon-button" title="새로고침" aria-label="새로고침" type="button">↻</button>
-          <button id="newTaskButton" class="primary-button" type="button">새 작업</button>
         </div>
       </header>
 
@@ -85,6 +102,7 @@
               <button id="tableResizeHandle" class="table-resize-handle" type="button" title="목록 폭 조정" aria-label="목록 폭 조정"></button>
               <div id="timelineBody" class="timeline-body">
                 <div id="gridLayer" class="grid-layer"></div>
+                <div id="rowHoverIndicator" class="row-hover-indicator" hidden></div>
                 <div id="todayLine" class="today-line" hidden></div>
                 <svg id="dependencyLayer" class="dependency-layer" aria-hidden="true"></svg>
                 <div id="barLayer" class="bar-layer"></div>

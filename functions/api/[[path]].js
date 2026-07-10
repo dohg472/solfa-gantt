@@ -259,6 +259,7 @@ async function getTasksPayload(env, request, options = {}) {
     .filter(isGanttScheduleTask)
     .sort(sortTasksForGantt);
 
+  const sourceRefreshedAt = new Date().toISOString();
   const payload = {
     tasks,
     channels: hiddenChannelSummaries([...sourceTasks, ...targetTasks], store),
@@ -298,7 +299,8 @@ async function getTasksPayload(env, request, options = {}) {
     },
     viewSettings: store.viewSettings || null,
     projectAliases: store.projectAliases || [],
-    loadedAt: new Date().toISOString(),
+    sourceRefreshedAt,
+    loadedAt: sourceRefreshedAt,
   };
 
   await writeTaskCache(env, payload, now + TASK_CACHE_MS);
@@ -317,6 +319,7 @@ function decorateTaskPayload(payload, store, request, env) {
     tunnel: { available: false, running: false, status: "disabled", publicBaseUrl: "", embedUrl: "" },
     viewSettings: store.viewSettings || null,
     projectAliases: store.projectAliases || [],
+    sourceRefreshedAt: payload.sourceRefreshedAt || payload.loadedAt || "",
     loadedAt: new Date().toISOString(),
   };
 }
@@ -669,7 +672,12 @@ async function deleteBaseline(env) {
 }
 
 async function getSyncStatus(env) {
-  return storeMeta(await readStore(env));
+  const [store, cache] = await Promise.all([readStore(env), readTaskCache(env)]);
+  return {
+    ...storeMeta(store),
+    sourceRefreshedAt: cache?.payload?.sourceRefreshedAt || cache?.payload?.loadedAt || "",
+    sourceExpiresAt: Number(cache?.expiresAt || 0),
+  };
 }
 
 function diagnosticsFor(tasks, sourceCount, targetCount, store) {

@@ -34,6 +34,7 @@ const VIEW_PREFS_KEY = "solpa-gantt-view";
 const REVIEW_PANEL_PREFS_KEY = "solpa-gantt-review-panel";
 const SYNC_STATUS_INTERVAL_MS = 15000;
 const FULL_SYNC_INTERVAL_MS = 300000;
+const SYNC_RETRY_INTERVAL_MS = 30000;
 const DEFAULT_COLLAPSED_REVIEW_SECTIONS = ["upload-only", "missing-upload", "completed"];
 const STALE_REVIEW_BACKLOG_DAYS = 14;
 const PINNED_CHANNELS = [
@@ -82,6 +83,9 @@ const state = {
   baseline: null,
   syncVersion: "",
   syncChangedAt: "",
+  sourceRefreshedAt: "",
+  lastSyncSucceededAt: "",
+  lastSyncErrorAt: "",
   appVersion: "",
   serverStartedAt: "",
   pendingAppVersion: "",
@@ -135,11 +139,13 @@ const state = {
   syncTimer: null,
   syncStatusTimer: null,
   autoSyncTimer: null,
+  syncRetryTimer: null,
   pendingSyncForce: false,
   ganttScrollFrame: null,
   renderedScrollLeft: 0,
   isLoading: false,
   pendingSyncReason: "",
+  hoveredRowId: "",
   impactResolve: null,
   inputResolve: null,
   inputFieldsSchema: [],
@@ -173,6 +179,7 @@ const els = {
   todayLine: document.getElementById("todayLine"),
   dependencyLayer: document.getElementById("dependencyLayer"),
   barLayer: document.getElementById("barLayer"),
+  rowHoverIndicator: document.getElementById("rowHoverIndicator"),
   selectionBox: document.getElementById("selectionBox"),
   dragTooltip: document.getElementById("dragTooltip"),
   emptyState: document.getElementById("emptyState"),
@@ -193,6 +200,9 @@ const els = {
   baselineToggleButton: document.getElementById("baselineToggleButton"),
   completedToggleButton: document.getElementById("completedToggleButton"),
   filterButton: document.getElementById("filterButton"),
+  moreTools: document.getElementById("moreTools"),
+  moreToolsButton: document.getElementById("moreToolsButton"),
+  moreToolsPanel: document.getElementById("moreToolsPanel"),
   hiddenManagerButton: document.getElementById("hiddenManagerButton"),
   activityButton: document.getElementById("activityButton"),
   operationButton: document.getElementById("operationButton"),
@@ -405,6 +415,14 @@ function bindEvents() {
   });
   els.panModeButton.addEventListener("click", togglePanMode);
   els.filterButton.addEventListener("click", openFilterPanel);
+  els.moreToolsButton?.addEventListener("click", (event) => {
+    event.stopPropagation();
+    toggleMoreTools();
+  });
+  els.moreToolsPanel?.addEventListener("click", (event) => {
+    event.stopPropagation();
+    if (event.target.closest("[data-close-more='true']")) closeMoreTools();
+  });
   els.closeFilterPanelButton.addEventListener("click", closeFilterPanel);
   els.filterPanelBackdrop.addEventListener("click", closeFilterPanel);
   els.channelFilterSelect.addEventListener("change", () => updateFilter("channel", els.channelFilterSelect.value));
@@ -505,6 +523,8 @@ function bindEvents() {
     submitInputModal();
   });
   els.taskTable.addEventListener("pointerdown", (event) => startSelectionDrag(event, "table"));
+  els.taskTable.addEventListener("pointerover", handleRowHoverStart);
+  els.taskTable.addEventListener("pointerout", handleRowHoverEnd);
   els.tableResizeHandle.addEventListener("pointerdown", startTableResize);
   els.tableResizeHandle.addEventListener("dblclick", resetTableWidth);
   els.ganttScroll.addEventListener("pointerdown", startPanDrag, { capture: true });
@@ -513,6 +533,8 @@ function bindEvents() {
   els.timelineNavigatorTrack?.addEventListener("pointerdown", startTimelineNavigatorJump);
   els.timelineNavigatorWindow?.addEventListener("pointerdown", startTimelineNavigatorDrag);
   els.timelineBody.addEventListener("pointerdown", (event) => startSelectionDrag(event, "timeline"));
+  els.barLayer.addEventListener("pointerover", handleRowHoverStart);
+  els.barLayer.addEventListener("pointerout", handleRowHoverEnd);
   els.timelineBody.addEventListener("contextmenu", openTimelineContext);
   els.contextCreateButton.addEventListener("click", createTaskFromContext);
   els.contextEditButton.addEventListener("click", () => {
@@ -545,6 +567,7 @@ function bindEvents() {
 
   document.addEventListener("click", (event) => {
     if (!els.contextMenu.contains(event.target)) hideContextMenu();
+    if (els.moreTools && !els.moreTools.contains(event.target)) closeMoreTools();
   });
 
   document.addEventListener("keydown", (event) => {
@@ -585,6 +608,7 @@ function handleEscapeCancel(event) {
   const hadReviewPanel = !els.reviewPanel.hidden;
   const hadActivityPanel = !els.activityPanel.hidden;
   const hadOperationPanel = !els.operationPanel.hidden;
+  const hadMoreTools = Boolean(els.moreToolsPanel && !els.moreToolsPanel.hidden);
   const hadEditor = state.editorOpen;
   const hadSelection = Boolean(state.selectedIds.size || state.selectedId || state.selectionAnchorRowId);
 
@@ -621,6 +645,7 @@ function handleEscapeCancel(event) {
     !hadReviewPanel &&
     !hadActivityPanel &&
     !hadOperationPanel &&
+    !hadMoreTools &&
     !hadEditor &&
     !hadSelection
   ) {
@@ -636,6 +661,7 @@ function handleEscapeCancel(event) {
   if (hadReviewPanel) closeReviewPanel();
   if (hadActivityPanel) closeActivityPanel();
   if (hadOperationPanel) closeOperationPanel();
+  if (hadMoreTools) closeMoreTools();
 
   if (hadSelection) {
     clearSelection(false);
@@ -685,6 +711,7 @@ function keyboardNudgeBlocked(event) {
   if (state.drag || state.dependencyDrag || state.selectionDrag || state.createDrag || state.timelineNavigatorDrag || state.panDrag) return true;
   if (!els.inputModal.hidden || !els.impactModal.hidden) return true;
   if (!els.contextMenu.hidden) return true;
+  if (els.moreToolsPanel && !els.moreToolsPanel.hidden) return true;
   if (document.querySelector(".range-popover") || document.querySelector(".meta-popover")) return true;
   const target = event.target;
   return Boolean(target?.closest?.("input, textarea, select, button, [contenteditable='true']"));
@@ -926,7 +953,29 @@ function syncViewControls() {
   els.baselineToggleButton.classList.toggle("is-disabled", !state.baseline?.exists);
   els.baselineToggleButton.title = state.baseline?.exists ? `${state.baseline.taskCount}개 일정 기준선 표시` : "운영 패널에서 기준선을 먼저 저장하세요";
   els.completedToggleButton.classList.toggle("is-active", state.showCompleted);
+  const activeFilterCount = Object.values(state.filters || {}).filter(Boolean).length;
+  els.filterButton.textContent = activeFilterCount ? `필터 ${activeFilterCount}` : "필터";
+  els.filterButton.classList.toggle("is-active", activeFilterCount > 0);
+  const hiddenCount = Number(state.diagnostics?.hiddenTasks || 0)
+    + Number(state.diagnostics?.hiddenProjects || 0)
+    + Number(state.diagnostics?.hiddenChannels || 0);
+  els.hiddenManagerButton.title = hiddenCount ? `${hiddenCount}개 숨김 기준 관리` : "숨김 기준 관리";
   renderSearchControls();
+}
+
+function toggleMoreTools() {
+  if (!els.moreToolsPanel || !els.moreToolsButton) return;
+  const shouldOpen = els.moreToolsPanel.hidden;
+  els.moreToolsPanel.hidden = !shouldOpen;
+  els.moreToolsButton.setAttribute("aria-expanded", String(shouldOpen));
+  els.moreToolsButton.classList.toggle("is-active", shouldOpen);
+}
+
+function closeMoreTools() {
+  if (!els.moreToolsPanel || els.moreToolsPanel.hidden) return;
+  els.moreToolsPanel.hidden = true;
+  els.moreToolsButton?.setAttribute("aria-expanded", "false");
+  els.moreToolsButton?.classList.remove("is-active");
 }
 
 function togglePanMode() {
@@ -980,7 +1029,9 @@ function setupSync() {
     if (document.visibilityState === "visible") checkSyncStatus();
   }, SYNC_STATUS_INTERVAL_MS);
   state.autoSyncTimer = window.setInterval(() => {
-    if (document.visibilityState === "visible") requestSyncRefresh("full-timer", 800);
+    if (document.visibilityState === "visible") {
+      requestSyncRefresh("full-timer", 800, { force: isSourceSnapshotStale() });
+    }
   }, FULL_SYNC_INTERVAL_MS);
 }
 
@@ -1050,7 +1101,9 @@ function notifyDataChanged(reason = "changed", options = {}) {
 
 function requestSyncRefresh(reason = "sync", delay = 1200, options = {}) {
   state.pendingSyncReason = reason;
-  state.pendingSyncForce = Boolean(state.pendingSyncForce || options.force);
+  const staleSourceRefresh = ["focus", "pageshow", "visible", "full-timer", "source-stale", "sync-retry"].includes(reason)
+    && isSourceSnapshotStale();
+  state.pendingSyncForce = Boolean(state.pendingSyncForce || options.force || staleSourceRefresh);
   window.clearTimeout(state.syncTimer);
   state.syncTimer = window.setTimeout(() => {
     if (isAutoSyncBusy()) {
@@ -1079,10 +1132,15 @@ async function checkSyncStatus() {
       return;
     }
     if (status.serverStartedAt) state.serverStartedAt = status.serverStartedAt;
+    if (status.sourceRefreshedAt) state.sourceRefreshedAt = status.sourceRefreshedAt;
     if (!state.appVersion && status.appVersion) state.appVersion = status.appVersion;
     if (state.pendingAppVersion && !isAutoSyncBusy()) {
       window.location.reload();
       return;
+    }
+    renderConnection();
+    if (isSourceSnapshotStale() && !isAutoSyncBusy() && document.visibilityState === "visible") {
+      requestSyncRefresh("source-stale", 100, { force: true });
     }
     if (!status.version) return;
     if (!state.syncVersion) {
@@ -1098,6 +1156,12 @@ async function checkSyncStatus() {
   } catch {
     // The regular full refresh path will surface connection errors when needed.
   }
+}
+
+function isSourceSnapshotStale() {
+  const refreshedAt = Date.parse(state.sourceRefreshedAt || "");
+  if (!Number.isFinite(refreshedAt)) return true;
+  return Date.now() - refreshedAt >= FULL_SYNC_INTERVAL_MS;
 }
 
 function isAutoSyncBusy() {
@@ -1122,9 +1186,15 @@ async function loadTasks(options = {}) {
   const normalizedOptions = options && !options.target ? options : {};
   const silent = Boolean(normalizedOptions.silent);
   const preserveScroll = Boolean(normalizedOptions.preserveScroll);
+  if (state.isLoading) {
+    requestSyncRefresh(normalizedOptions.reason || "queued-load", 900, { force: normalizedOptions.force });
+    return;
+  }
   const scrollLeft = els.ganttScroll.scrollLeft;
   const scrollTop = els.ganttScroll.scrollTop;
   state.isLoading = true;
+  els.refreshButton.classList.add("is-loading");
+  els.refreshButton.setAttribute("aria-busy", "true");
   if (!silent) els.connectionLine.textContent = "불러오는 중";
   try {
     const response = await fetch(apiUrl(normalizedOptions.force ? "/api/tasks?refresh=1" : "/api/tasks"));
@@ -1146,9 +1216,14 @@ async function loadTasks(options = {}) {
     state.baseline = data.baseline || data.diagnostics?.baseline || null;
     state.syncVersion = data.sync?.version || state.syncVersion;
     state.syncChangedAt = data.sync?.changedAt || state.syncChangedAt;
+    state.sourceRefreshedAt = data.sourceRefreshedAt || data.sync?.sourceRefreshedAt || data.loadedAt || state.sourceRefreshedAt;
     state.appVersion = data.sync?.appVersion || state.appVersion;
     state.serverStartedAt = data.sync?.serverStartedAt || state.serverStartedAt;
     state.loadedAt = data.loadedAt;
+    state.lastSyncSucceededAt = new Date().toISOString();
+    state.lastSyncErrorAt = "";
+    window.clearTimeout(state.syncRetryTimer);
+    state.syncRetryTimer = null;
     applySharedViewPrefs(data.viewSettings);
     if (state.selectedId && !state.tasks.some((task) => task.id === state.selectedId)) {
       state.selectedId = "";
@@ -1169,11 +1244,23 @@ async function loadTasks(options = {}) {
       window.setTimeout(() => scrollToToday(false), 300);
     }
   } catch (error) {
+    state.lastSyncErrorAt = new Date().toISOString();
     if (!silent) showToast(error.message);
-    els.connectionLine.textContent = silent ? "동기화 오류" : "연결 오류";
+    renderConnection();
+    scheduleSyncRetry();
   } finally {
     state.isLoading = false;
+    els.refreshButton.classList.remove("is-loading");
+    els.refreshButton.removeAttribute("aria-busy");
   }
+}
+
+function scheduleSyncRetry() {
+  if (state.syncRetryTimer || document.visibilityState !== "visible") return;
+  state.syncRetryTimer = window.setTimeout(() => {
+    state.syncRetryTimer = null;
+    requestSyncRefresh("sync-retry", 100, { force: true });
+  }, SYNC_RETRY_INTERVAL_MS);
 }
 
 function refreshOpenPanelsAfterDataLoad() {
@@ -1225,6 +1312,7 @@ function render() {
   renderRows(state.rows, criticalTaskIds);
   renderDependencies(state.rows, dayWidth, criticalTaskIds, dependencyConflicts);
   renderBars(state.rows, dayWidth, criticalTaskIds);
+  applyHoveredRowState();
   renderTimelineNavigator(timelineWidth);
   renderOptions();
   renderFilterState();
@@ -3263,11 +3351,10 @@ function rangeOf(tasks) {
 
 function renderConnection() {
   if (!state.connection) {
-    els.connectionLine.textContent = "";
+    els.connectionLine.textContent = state.lastSyncErrorAt ? "연결 재시도 중" : "";
     delete els.connectionLine.dataset.embedMode;
     return;
   }
-  const loaded = state.loadedAt ? ` · ${formatTime(state.loadedAt)}` : "";
   const fixedEmbed = Boolean(state.embed?.notionReady);
   const embedMode = state.embed?.mode || "";
   const embedLabel = fixedEmbed
@@ -3277,8 +3364,26 @@ function renderConnection() {
       : state.embed?.localEmbedUrl
         ? "로컬 고정 임베드"
         : "임시 임베드";
+  const sourceName = state.connection.source || (String(state.connection.label || "").includes("채널팀 플랜") ? "채널팀 플랜" : "");
+  const targetName = state.connection.target || (state.connection.writeMode === "target" ? "간트_확인" : "");
+  const sourceLabel = sourceName && targetName
+    ? `${sourceName} → ${targetName}`
+    : state.connection.label || (sourceName ? `${sourceName} 읽기 전용` : "노션 연결");
+  const freshnessLabel = state.lastSyncErrorAt ? "동기화 재시도 중" : syncFreshnessLabel();
   els.connectionLine.dataset.embedMode = fixedEmbed ? "fixed" : "temporary";
-  els.connectionLine.textContent = `${state.connection.label}${loaded} · ${embedLabel} · 자동 동기화`;
+  els.connectionLine.dataset.syncState = state.lastSyncErrorAt ? "error" : isSourceSnapshotStale() ? "stale" : "fresh";
+  els.connectionLine.textContent = `${sourceLabel} · ${freshnessLabel} · ${embedLabel}`;
+  els.connectionLine.title = "간트에서 저장한 변경은 즉시 반영되고, 채널팀 플랜 원본은 최대 5분 간격으로 자동 갱신됩니다.";
+}
+
+function syncFreshnessLabel() {
+  const value = state.sourceRefreshedAt || state.loadedAt;
+  const timestamp = Date.parse(value || "");
+  if (!Number.isFinite(timestamp)) return "자동 동기화";
+  const elapsedMinutes = Math.max(0, Math.floor((Date.now() - timestamp) / 60000));
+  if (elapsedMinutes < 1) return "방금 동기화";
+  if (elapsedMinutes < 60) return `${elapsedMinutes}분 전 동기화`;
+  return `${formatTime(value)} 동기화`;
 }
 
 function renderStatusBanner() {
@@ -3306,6 +3411,7 @@ function currentStatusBanner() {
   const urgentReviewCount = reviewHighPriorityCount(report);
   const hiddenTasks = Number(diagnostics.hiddenTasks || 0);
   const hiddenProjects = Number(diagnostics.hiddenProjects || 0);
+  const hiddenProjectLeaks = Number(diagnostics.hiddenProjectLeaks || 0);
   const sideIssues = statusSideIssueText({ hiddenTasks, hiddenProjects, urgentReviewCount });
 
   if (!fixedEmbed) {
@@ -3320,11 +3426,11 @@ function currentStatusBanner() {
     };
   }
 
-  if (hiddenTasks > 0) {
+  if (hiddenProjectLeaks > 0) {
     return {
       tone: "warn",
-      title: "개별 숨김 정리 필요",
-      detail: `개별 숨김 ${hiddenTasks}개가 남아 있어 같은 프로젝트가 다시 보일 수 있습니다. 프로젝트 숨김은 ${hiddenProjects}개입니다.`,
+      title: "숨김 기준 확인 필요",
+      detail: `숨긴 프로젝트 중 ${hiddenProjectLeaks}개에서 다시 표시된 일정이 감지됐습니다. 직접 숨긴 항목은 유지한 채 기준만 정리할 수 있습니다.`,
       button: "숨김 열기",
       panel: "hidden",
     };
@@ -3656,7 +3762,7 @@ function renderRows(rows, criticalTaskIds) {
           ? `<span class="task-meta" data-meta-edit="true" title="${escapeHtml(metaTitle)}">${escapeHtml(meta)}</span>`
           : "";
         return `
-          <div class="task-row${selected}${critical}${dependencyConflict}${workloadConflict}" role="button" tabindex="0" data-task-id="${escapeHtml(row.id)}" style="--task-color:${row.color};--progress:${row.progress}%">
+          <div class="task-row${selected}${critical}${dependencyConflict}${workloadConflict}" role="button" tabindex="0" data-task-id="${escapeHtml(row.id)}" data-model-row-id="${escapeHtml(row.id)}" style="--task-color:${row.color};--progress:${row.progress}%">
             <span class="task-main level-task">
               <span class="task-dot"></span>
               <span class="task-text">
@@ -3675,7 +3781,7 @@ function renderRows(rows, criticalTaskIds) {
       }
 
       return `
-        <div class="task-row group-row ${row.kind}${issue}${dependencyConflict}${workloadConflict}${reordering}${leaf}${row.hiddenOnly ? " is-readonly" : ""}" data-row-id="${escapeHtml(row.id)}" style="--task-color:${row.color};--progress:${row.progress}%">
+        <div class="task-row group-row ${row.kind}${issue}${dependencyConflict}${workloadConflict}${reordering}${leaf}${row.hiddenOnly ? " is-readonly" : ""}" data-row-id="${escapeHtml(row.id)}" data-model-row-id="${escapeHtml(row.id)}" style="--task-color:${row.color};--progress:${row.progress}%">
           <span class="task-main level-${row.kind}">
             <span class="group-caret">${row.collapsed ? "▸" : "▾"}</span>
             <span class="task-text">
@@ -3781,6 +3887,48 @@ function renderRows(rows, criticalTaskIds) {
       if (row) openRowContext(event, row);
     });
   });
+}
+
+function handleRowHoverStart(event) {
+  const rowId = hoveredRowIdFromTarget(event.target);
+  if (rowId) setHoveredRow(rowId);
+}
+
+function handleRowHoverEnd(event) {
+  const currentRowId = hoveredRowIdFromTarget(event.target);
+  if (!currentRowId) return;
+  const nextRowId = hoveredRowIdFromTarget(event.relatedTarget);
+  if (nextRowId === currentRowId) return;
+  setHoveredRow(nextRowId);
+}
+
+function hoveredRowIdFromTarget(target) {
+  const element = target?.closest?.("[data-model-row-id], .gantt-bar[data-row-id]");
+  return element?.dataset?.modelRowId || element?.dataset?.rowId || "";
+}
+
+function setHoveredRow(rowId = "") {
+  const normalized = String(rowId || "");
+  if (state.hoveredRowId === normalized) return;
+  state.hoveredRowId = normalized;
+  applyHoveredRowState();
+}
+
+function applyHoveredRowState() {
+  const rowId = state.hoveredRowId;
+  els.taskTable.querySelectorAll("[data-model-row-id]").forEach((element) => {
+    element.classList.toggle("is-row-hovered", Boolean(rowId) && element.dataset.modelRowId === rowId);
+  });
+  els.barLayer.querySelectorAll(".gantt-bar[data-row-id]").forEach((element) => {
+    element.classList.toggle("is-row-hovered", Boolean(rowId) && element.dataset.rowId === rowId);
+  });
+
+  if (!els.rowHoverIndicator) return;
+  const rowIndex = rowId ? state.rows.findIndex((row) => row.id === rowId) : -1;
+  els.rowHoverIndicator.hidden = rowIndex < 0;
+  if (rowIndex < 0) return;
+  els.rowHoverIndicator.style.top = `${rowIndex * currentRowHeight()}px`;
+  els.rowHoverIndicator.style.height = `${currentRowHeight()}px`;
 }
 
 function healthChipMarkup(health) {
