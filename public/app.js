@@ -54,6 +54,12 @@ const DEFAULT_PROJECT_ALIAS_RULES = [
     ],
   },
 ];
+const DEFAULT_TASK_PROJECT_OVERRIDES = new Map([
+  ["3999a919c6cd80f7a07ef873cd3491b2", "[리센느 원이] 경주 EP.1 ~ EP.3"],
+  ["38c9a919c6cd8093a53ae2e24c99e6ae", "[리센느 원이] 경주 EP.1 ~ EP.3"],
+  ["39f9a919c6cd809fb9fbc0cbe6fc76f3", "[리센느 원이] 경주 EP.1 ~ EP.3"],
+  ["39f9a919c6cd80a88276c70ad0475818", "[리센느 원이] 경주 EP.1 ~ EP.3"],
+]);
 
 const state = {
   tasks: [],
@@ -1593,7 +1599,7 @@ function buildRows(tasks) {
   function ensureTaskProjectGroup(task) {
     const channelName = task.channel || "미지정 채널";
     const projectName = task.project || task.title || "새 프로젝트";
-    const resolvedProjectName = resolveProjectAliasName(channelName, projectName);
+    const resolvedProjectName = projectNameForTask(task);
     const projectKey = canonicalProjectKey(resolvedProjectName);
     if (!channels.has(channelName)) {
       channels.set(channelName, { name: channelName, projects: new Map(), tasks: [] });
@@ -2117,7 +2123,7 @@ function projectReviewGroups(tasks = state.tasks) {
   tasks.filter(isReviewableTask).forEach((task) => {
     const channelName = task.channel || "미지정 채널";
     const projectName = task.project || task.title || "새 프로젝트";
-    const resolvedProject = resolveProjectAliasName(channelName, projectName);
+    const resolvedProject = projectNameForTask(task);
     if (!channels.has(channelName)) {
       channels.set(channelName, { name: channelName, projects: new Map() });
     }
@@ -2595,6 +2601,18 @@ function resolveProjectAliasName(channel, projectName) {
   return resolved;
 }
 
+function projectNameForTask(task) {
+  const override = [task?.id, task?.originId]
+    .map(taskLookupKey)
+    .map((key) => DEFAULT_TASK_PROJECT_OVERRIDES.get(key))
+    .find(Boolean);
+  return override || resolveProjectAliasName(task?.channel || "", task?.project || task?.title || "새 프로젝트");
+}
+
+function taskLookupKey(value) {
+  return String(value || "").replace(/[^0-9a-z]/gi, "").toLowerCase();
+}
+
 function defaultProjectAliasName(channel, projectName) {
   const channelKey = normalizeChannelName(channel);
   const projectKey = canonicalProjectKey(projectName);
@@ -2780,14 +2798,26 @@ function sharesEpisodeNumber(a, b) {
 }
 
 function sharesEpisodeIdentity(a, b) {
+  const episodesA = episodeNumbers(a);
+  const episodesB = episodeNumbers(b);
+  if (!episodesA.size || !episodesB.size || !sharesEpisodeNumber(a, b)) return false;
+
+  const rootA = episodeProjectRoot(a);
+  const rootB = episodeProjectRoot(b);
+  if (rootA && rootB && sameSegmentText(rootA, rootB)) return true;
+
   const segmentsA = episodeSegments(a);
   const segmentsB = episodeSegments(b);
   for (const [episode, segmentA] of segmentsA) {
     if (!segmentsB.has(episode)) continue;
     const segmentB = segmentsB.get(episode);
-    if (!segmentA || !segmentB || sameSegmentText(segmentA, segmentB)) return true;
+    if (segmentA && segmentB && sameSegmentText(segmentA, segmentB)) return true;
   }
   return false;
+}
+
+function episodeProjectRoot(value) {
+  return normalizeSegment(String(value || "").replace(/ep\d+/gi, " "));
 }
 
 function sharesEpisodeTitle(a, b) {
@@ -3268,7 +3298,7 @@ function workloadDatesForTask(task) {
 
 function workloadProjectKey(task) {
   const channel = normalizeChannelName(task.channel);
-  const project = canonicalProjectKey(resolveProjectAliasName(task.channel || "", task.project || task.title || ""));
+  const project = canonicalProjectKey(projectNameForTask(task));
   return channel && project ? `${channel}:${project}` : "";
 }
 
@@ -11270,7 +11300,7 @@ function projectKeySetsOverlap(leftKeys, rightKeys) {
 }
 
 function projectScopeKeys(task) {
-  const projectName = resolveProjectAliasName(task.channel || "", task.project || task.title || "");
+  const projectName = projectNameForTask(task);
   const key = canonicalProjectKey(projectName);
   if (!key) return [];
   return [...projectAliasKeys(key)];
@@ -11311,12 +11341,12 @@ function projectMatchesIssueFilter(tasks, filter) {
 
 function projectTasksForIssueFilter(task) {
   const channelKey = normalizeChannelName(task.channel);
-  const projectName = resolveProjectAliasName(task.channel || "", task.project || task.title || "");
+  const projectName = projectNameForTask(task);
   const projectKeys = [...projectAliasKeys(canonicalProjectKey(projectName))];
   return state.tasks.filter((item) => {
     const itemChannelKey = normalizeChannelName(item.channel);
     if (itemChannelKey !== channelKey) return false;
-    const itemProjectName = resolveProjectAliasName(item.channel || "", item.project || item.title || "");
+    const itemProjectName = projectNameForTask(item);
     const itemKeys = [...projectAliasKeys(canonicalProjectKey(itemProjectName))];
     return projectKeySetsOverlap(itemKeys, projectKeys);
   });
