@@ -1481,7 +1481,7 @@ function sortTasksForGantt(a, b) {
 }
 
 function inferChannel(title) {
-  const match = String(title || "").match(/^\[([^\]]+)\]/);
+  const match = String(title || "").match(/^[\s*•·\-–—_~!#]*\[([^\]]+)\]/);
   return match?.[1] || "";
 }
 
