@@ -1771,6 +1771,11 @@ function buildRows(tasks) {
       collapsed: state.collapsedRows.has(channelId),
       taskIds: channel.tasks.length ? channel.tasks.map((task) => task.id) : (channel.rangeTasks || []).map((task) => task.id).concat(channel.hiddenTaskIds || []),
       hiddenOnly: Boolean(channel.hiddenOnly),
+      displayHiddenRange: Boolean(
+        channel.hiddenOnly &&
+        state.groupRanges?.[channelId]?.start &&
+        state.groupRanges?.[channelId]?.end
+      ),
       emptyOnly: Boolean(channel.emptyOnly),
       restoreActions: channel.restoreActions || [],
     });
@@ -3793,7 +3798,7 @@ function renderRows(rows, criticalTaskIds) {
       const workloadConflict = row.workloadRiskCount ? " is-workload-conflict" : "";
       const reordering = state.rowReorderDrag?.rowId === row.id ? " is-reordering" : "";
       const leaf = row.leafOnly ? " is-leaf" : "";
-      const range = row.hiddenOnly ? "숨김 유지" : `${dateLabel(row.start)}-${dateLabel(row.end)}`;
+      const range = row.hiddenOnly && !row.displayHiddenRange ? "숨김 유지" : `${dateLabel(row.start)}-${dateLabel(row.end)}`;
       const nameTitle = row.hiddenOnly ? row.title : `${row.title} · 더블클릭해 이름 수정`;
       const rangeTitle = row.hiddenOnly ? range : `${range} · 더블클릭해 기간 수정`;
       if (row.kind === "task") {
@@ -4334,7 +4339,7 @@ function renderBars(rows, dayWidth, criticalTaskIds) {
   const baselineMap = baselineTaskMap();
 
   rows.forEach((row, index) => {
-    if (row.hiddenOnly) return;
+    if (row.hiddenOnly && !row.displayHiddenRange) return;
     const baseline = baselineRangeForRow(row, baselineMap, taskById);
     if (baseline) {
       const baselineLeft = daysBetween(state.rangeStart, baseline.start) * dayWidth;
@@ -4356,7 +4361,7 @@ function renderBars(rows, dayWidth, criticalTaskIds) {
     const { left, width, clippedStart, clippedEnd } = visibleBarRect(rawLeft, rawWidth, row.kind);
     if (width <= 0) return;
     const isGroupRow = row.kind === "channel" || row.kind === "project";
-    const editableGroup = row.kind === "task" || isGroupRow || (row.taskIds || []).some((id) => editableTaskIds.has(id));
+    const editableGroup = !row.hiddenOnly && (row.kind === "task" || isGroupRow || (row.taskIds || []).some((id) => editableTaskIds.has(id)));
     const bar = document.createElement("div");
     bar.className = `gantt-bar ${row.kind}${rowSelectionClass(row)}${row.isPause ? " is-pause" : ""}${row.kind === "task" && criticalTaskIds.has(row.task.id) ? " is-critical" : ""}`;
     if (row.issue) bar.classList.add(`is-issue-${row.issue}`);
@@ -4434,12 +4439,12 @@ function renderBars(rows, dayWidth, criticalTaskIds) {
         selectRow(row, event);
         event.stopPropagation();
       });
-      bar.addEventListener("dblclick", (event) => {
-        event.preventDefault();
-        openGroupEditor(row);
-        event.stopPropagation();
-      });
       if (editableGroup) {
+        bar.addEventListener("dblclick", (event) => {
+          event.preventDefault();
+          openGroupEditor(row);
+          event.stopPropagation();
+        });
         bar.addEventListener("pointerdown", (event) => {
           if (isSelectionModifier(event)) return;
           if (event.button !== 0 || event.target.dataset.mode) return;
