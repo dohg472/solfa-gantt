@@ -236,28 +236,24 @@ async function getTasksPayload(env, request, options = {}) {
   ]);
 
   const targetTasksRaw = targetPages.flatMap((page) => pageToTask(page, writeSchema, "target"));
-  const targetOriginMap = new Map();
+  const mappedOriginsByTargetId = originIdsByTargetId(store.writeMap);
   for (const task of targetTasksRaw) {
     const originId = task.originId || findOriginMarker(task.description);
-    if (originId) {
-      task.originId = originId;
-      targetOriginMap.set(normalizeLookupId(originId), task.id);
-    }
+    task.originId = originId || mappedOriginsByTargetId.get(normalizeLookupId(task.id)) || "";
   }
 
-  const sourceTasks = sourcePages
+  const sourceTasksRaw = sourcePages
     .flatMap((page) => pageToTask(page, readSchema, "source"))
-    .filter((task) => !targetOriginMap.has(normalizeLookupId(task.id)))
-    .filter((task) => !store.writeMap?.[task.id])
     .map((task) => ({ ...task, syncMode: "read-only" }));
 
-  const sourceTasksForDedupe = sourceTasks.map(normalizeTask).filter(isGanttScheduleTask);
-  const targetTasks = targetTasksRaw
+  const targetTasksPrepared = targetTasksRaw
     .map((task) => ({
       ...task,
       syncMode: task.originId ? "target-copy" : "target",
-    }))
-    .filter((task) => !isTargetTaskSupersededBySource(task, sourceTasksForDedupe));
+    }));
+  const reconciled = reconcileProductionTasks(sourceTasksRaw, targetTasksPrepared, store);
+  const sourceTasks = reconciled.sourceTasks;
+  const targetTasks = reconciled.targetTasks;
 
   const tasks = [...sourceTasks, ...targetTasks]
     .map(normalizeTask)
@@ -272,7 +268,7 @@ async function getTasksPayload(env, request, options = {}) {
   const sourceRefreshedAt = new Date().toISOString();
   const payload = {
     tasks,
-    channels: hiddenChannelSummaries([...sourceTasks, ...targetTasks], store),
+    channels: hiddenChannelSummaries([...sourceTasksRaw, ...targetTasksPrepared], store),
     hiddenChannels: store.hiddenChannels || [],
     hiddenProjects: store.hiddenProjects || [],
     connection: {
@@ -343,7 +339,13 @@ async function createTaskInTarget(env, patch) {
     ...patch,
   });
   const page = await createTargetPage(env, task, schema);
-  const saved = normalizeTask({ ...task, id: page.id, source: "target", syncMode: "target" });
+  const saved = normalizeTask({
+    ...task,
+    id: page.id,
+    source: "target",
+    syncMode: "target",
+    updatedAt: page.last_edited_time || new Date().toISOString(),
+  });
   await mutateStore(env, (store) => {
     addActivity(store, { type: "create", title: "상세일정 생성", task: saved });
   });
@@ -352,15 +354,47 @@ async function createTaskInTarget(env, patch) {
 }
 
 async function patchTask(env, id, patch) {
-  const schema = await getDatabaseSchema(env, config(env).writeDatabaseId, "write");
+  const writeDatabaseId = config(env).writeDatabaseId;
+  const schema = await getDatabaseSchema(env, writeDatabaseId, "write");
   const store = await readStore(env);
-  const targetId = store.writeMap?.[id] || id;
-  const directTarget = await pageExists(env, targetId);
+  const mappedEntry = writeMapEntryForOrigin(store.writeMap, id);
+  const mappedPage = mappedEntry?.targetId
+    ? await getPageInDatabase(env, mappedEntry.targetId, writeDatabaseId)
+    : null;
+  const directTargetPage = mappedPage ? null : await getPageInDatabase(env, id, writeDatabaseId);
+  let existingTargetTask = mappedPage
+    ? pageToTask(mappedPage, schema, "target")[0]
+    : directTargetPage
+      ? pageToTask(directTargetPage, schema, "target")[0]
+      : null;
 
-  if (directTarget) {
-    await updateTargetPage(env, targetId, patch, schema);
-    const saved = normalizeTask({ ...patch, id: targetId, source: "target", syncMode: "target" });
+  if (!existingTargetTask) {
+    existingTargetTask = await findTargetTaskByOrigin(env, id, schema);
+  }
+
+  if (existingTargetTask) {
+    const targetId = existingTargetTask.id;
+    const mappedOriginId =
+      mappedEntry?.originId ||
+      existingTargetTask.originId ||
+      originIdsByTargetId(store.writeMap).get(normalizeLookupId(targetId)) ||
+      "";
+    const page = await updateTargetPage(
+      env,
+      targetId,
+      mappedOriginId ? { ...patch, originId: mappedOriginId } : patch,
+      schema,
+    );
+    const saved = normalizeTask({
+      ...patch,
+      id: targetId,
+      originId: mappedOriginId,
+      source: "target",
+      syncMode: mappedOriginId ? "target-copy" : "target",
+      updatedAt: page.last_edited_time || new Date().toISOString(),
+    });
     await mutateStore(env, (nextStore) => {
+      if (mappedOriginId) nextStore.writeMap[mappedOriginId] = targetId;
       addActivity(nextStore, { type: "update", title: "상세일정 수정", task: saved });
     });
     await invalidateTaskCache(env);
@@ -368,11 +402,18 @@ async function patchTask(env, id, patch) {
   }
 
   const sourcePage = await notionRequest(env, `/v1/pages/${id}`, { method: "GET" });
+  if (!pageBelongsToDatabase(sourcePage, config(env).readDatabaseId)) {
+    throw httpError(404, "수정할 원본 일정을 찾을 수 없습니다.");
+  }
   const readSchema = await getDatabaseSchema(env, config(env).readDatabaseId, "read");
   const [sourceTask] = pageToTask(sourcePage, readSchema, "source");
   const nextTask = normalizeTask({ ...sourceTask, ...patch, originId: id, source: "target", syncMode: "target-copy" });
   const page = await createTargetPage(env, nextTask, schema);
-  const saved = normalizeTask({ ...nextTask, id: page.id });
+  const saved = normalizeTask({
+    ...nextTask,
+    id: page.id,
+    updatedAt: page.last_edited_time || new Date().toISOString(),
+  });
 
   await mutateStore(env, (nextStore) => {
     nextStore.writeMap[id] = page.id;
@@ -895,7 +936,7 @@ function pageToTask(page, schema, source) {
     status,
     assignee,
     assigneeIds,
-    description,
+    description: stripOriginMarker(description),
     start,
     end,
     color: colorForGantt([channel, project, detail, title].filter(Boolean).join(" ")),
@@ -918,7 +959,7 @@ async function createTargetPage(env, task, schema) {
 }
 
 async function updateTargetPage(env, pageId, patch, schema) {
-  await notionRequest(env, `/v1/pages/${pageId}`, {
+  return notionRequest(env, `/v1/pages/${pageId}`, {
     method: "PATCH",
     body: JSON.stringify({ properties: taskToNotionProperties(patch, schema) }),
   });
@@ -933,8 +974,9 @@ function taskToNotionProperties(task, schema) {
   setTypedProperty(properties, schema.detailName, schema.detailType, task.detail || "");
   setTypedProperty(properties, schema.statusName, schema.statusType, task.status || "");
   setAssigneeProperty(properties, schema.assigneeName, schema.assigneeType, task.assignee, task.assigneeIds);
+  const description = stripOriginMarker(task.description || "");
   const originLine = task.originId ? `\n${ORIGIN_MARKER_PREFIX}:${task.originId}` : "";
-  setTypedProperty(properties, schema.descriptionName, schema.descriptionType, `${task.description || ""}${originLine}`.trim());
+  setTypedProperty(properties, schema.descriptionName, schema.descriptionType, `${description}${originLine}`.trim());
   return Object.fromEntries(Object.entries(properties).filter(([, value]) => value));
 }
 
@@ -977,14 +1019,30 @@ function richText(value) {
   return content ? [{ type: "text", text: { content } }] : [];
 }
 
-async function pageExists(env, id) {
-  if (!id) return false;
+async function getPageInDatabase(env, id, databaseId) {
+  if (!id || !databaseId) return null;
   try {
-    await notionRequest(env, `/v1/pages/${id}`, { method: "GET" });
-    return true;
+    const page = await notionRequest(env, `/v1/pages/${id}`, { method: "GET" });
+    return pageBelongsToDatabase(page, databaseId) ? page : null;
   } catch {
-    return false;
+    return null;
   }
+}
+
+function pageBelongsToDatabase(page, databaseId) {
+  const parentId = page?.parent?.type === "database_id" ? page.parent.database_id : "";
+  return Boolean(parentId && normalizeLookupId(parentId) === normalizeLookupId(databaseId));
+}
+
+async function findTargetTaskByOrigin(env, originId, schema) {
+  const originKey = normalizeLookupId(originId);
+  if (!originKey) return null;
+  const pages = await queryDatabase(env, config(env).writeDatabaseId);
+  for (const page of pages) {
+    const [task] = pageToTask(page, schema, "target");
+    if (normalizeLookupId(task?.originId) === originKey) return task;
+  }
+  return null;
 }
 
 async function notionRequest(env, endpoint, options = {}) {
@@ -1266,6 +1324,12 @@ function findOriginMarker(text) {
   return match?.[1] || "";
 }
 
+function stripOriginMarker(text) {
+  return String(text || "")
+    .replace(/\n*\s*solpa-gantt-origin:[0-9a-f-]{32,36}\s*/gi, "")
+    .trim();
+}
+
 function isHiddenTaskId(hidden, id) {
   const lookup = normalizeLookupId(id);
   return Boolean(lookup && (hidden || []).map(normalizeLookupId).includes(lookup));
@@ -1288,24 +1352,132 @@ function isHiddenProjectName(hiddenProjects, task) {
   });
 }
 
-function isTargetTaskSupersededBySource(targetTask, sourceTasks) {
-  if (!targetTask || targetTask.originId) return false;
-  const target = normalizeTask(targetTask);
-  if (!isGanttScheduleTask(target) && !isProjectPlaceholderTask(target)) return false;
-  return (sourceTasks || []).some((source) => isSameProductionSchedule(source, target));
+function originIdsByTargetId(writeMap) {
+  const origins = new Map();
+  for (const [originId, targetId] of Object.entries(writeMap || {})) {
+    const targetKey = normalizeLookupId(targetId);
+    if (targetKey && originId && !origins.has(targetKey)) origins.set(targetKey, originId);
+  }
+  return origins;
 }
 
-function isSameProductionSchedule(source, target) {
+function writeMapEntryForOrigin(writeMap, originId) {
+  const originKey = normalizeLookupId(originId);
+  if (!originKey) return null;
+  for (const [storedOriginId, targetId] of Object.entries(writeMap || {})) {
+    if (normalizeLookupId(storedOriginId) === originKey && targetId) {
+      return { originId: storedOriginId, targetId };
+    }
+  }
+  return null;
+}
+
+function reconcileProductionTasks(sourceTasks, targetTasks, store = {}) {
+  const sources = (sourceTasks || []).map(normalizeTask);
+  const targets = (targetTasks || []).map(normalizeTask);
+  const sourceGroups = new Map();
+  const sourceGroupByTaskId = new Map();
+
+  for (const source of sources) {
+    const channelKey = normalizeChannelName(source.channel);
+    const projectKey = projectKeyForProductionDedupe(source, store);
+    if (!channelKey || !projectKey) continue;
+    const groupKey = `${channelKey}:${projectKey}`;
+    if (!sourceGroups.has(groupKey)) {
+      sourceGroups.set(groupKey, { channelKey, projectKey, tasks: [], updatedAt: "" });
+    }
+    const group = sourceGroups.get(groupKey);
+    group.tasks.push(source);
+    if (compareUpdatedAt(source.updatedAt, group.updatedAt) > 0) group.updatedAt = source.updatedAt;
+    sourceGroupByTaskId.set(normalizeLookupId(source.id), group);
+  }
+
+  const visibleSourceIds = new Set(sources.map((task) => normalizeLookupId(task.id)));
+  const visibleTargetIds = new Set(targets.map((task) => normalizeLookupId(task.id)));
+  const pairedSourceIds = new Set();
+  const orderedTargets = targets.slice().sort((left, right) =>
+    compareUpdatedAt(right.updatedAt, left.updatedAt) ||
+    compareDate(left.start, right.start) ||
+    compareText(left.id, right.id)
+  );
+
+  for (const target of orderedTargets) {
+    const targetId = normalizeLookupId(target.id);
+    const sourceGroup = sourceGroupForTarget(target, sourceGroups, sourceGroupByTaskId, store);
+    if (!sourceGroup) continue;
+
+    const sourceProjectIsNewer = compareUpdatedAt(sourceGroup.updatedAt, target.updatedAt) > 0;
+    if (isProjectPlaceholderTask(target)) {
+      if (sourceProjectIsNewer) visibleTargetIds.delete(targetId);
+      continue;
+    }
+
+    const candidates = sourceGroup.tasks
+      .filter((source) => isSameProductionSchedule(source, target, store))
+      .sort((left, right) =>
+        Number(normalizeLookupId(right.id) === normalizeLookupId(target.originId)) -
+          Number(normalizeLookupId(left.id) === normalizeLookupId(target.originId)) ||
+        taskDateDistance(left, target) - taskDateDistance(right, target) ||
+        compareText(left.id, right.id)
+      );
+    if (!candidates.length) continue;
+
+    if (sourceProjectIsNewer) {
+      visibleTargetIds.delete(targetId);
+      continue;
+    }
+
+    const sourceToReplace = candidates.find((source) => !pairedSourceIds.has(normalizeLookupId(source.id)));
+    if (!sourceToReplace) continue;
+    const sourceId = normalizeLookupId(sourceToReplace.id);
+    pairedSourceIds.add(sourceId);
+    visibleSourceIds.delete(sourceId);
+  }
+
+  return {
+    sourceTasks: sources.filter((task) => visibleSourceIds.has(normalizeLookupId(task.id))),
+    targetTasks: targets.filter((task) => visibleTargetIds.has(normalizeLookupId(task.id))),
+  };
+}
+
+function sourceGroupForTarget(target, sourceGroups, sourceGroupByTaskId, store) {
+  const originGroup = sourceGroupByTaskId.get(normalizeLookupId(target.originId));
+  if (originGroup) return originGroup;
+
+  const channelKey = normalizeChannelName(target.channel);
+  const projectKey = projectKeyForProductionDedupe(target, store);
+  if (!channelKey || !projectKey) return null;
+  const exact = sourceGroups.get(`${channelKey}:${projectKey}`);
+  if (exact) return exact;
+
+  return [...sourceGroups.values()]
+    .filter((group) => group.channelKey === channelKey && projectKeyMatches(group.projectKey, projectKey))
+    .sort((left, right) => compareUpdatedAt(right.updatedAt, left.updatedAt))[0] || null;
+}
+
+function compareUpdatedAt(left, right) {
+  const leftTime = Date.parse(String(left || ""));
+  const rightTime = Date.parse(String(right || ""));
+  const normalizedLeft = Number.isFinite(leftTime) ? leftTime : 0;
+  const normalizedRight = Number.isFinite(rightTime) ? rightTime : 0;
+  return normalizedLeft === normalizedRight ? 0 : normalizedLeft > normalizedRight ? 1 : -1;
+}
+
+function taskDateDistance(left, right) {
+  const leftTime = Date.parse(`${left?.start || ""}T00:00:00Z`);
+  const rightTime = Date.parse(`${right?.start || ""}T00:00:00Z`);
+  if (!Number.isFinite(leftTime) || !Number.isFinite(rightTime)) return Number.MAX_SAFE_INTEGER;
+  return Math.abs(leftTime - rightTime);
+}
+
+function isSameProductionSchedule(source, target, store = {}) {
   if (!source || !target) return false;
   if (normalizeChannelName(source.channel) !== normalizeChannelName(target.channel)) return false;
-  if (!projectKeyMatches(projectKeyForProductionDedupe(source), projectKeyForProductionDedupe(target))) return false;
+  if (!projectKeyMatches(projectKeyForProductionDedupe(source, store), projectKeyForProductionDedupe(target, store))) return false;
   if (isProjectPlaceholderTask(target)) return true;
   const sourceKind = scheduleKindKey(source);
   const targetKind = scheduleKindKey(target);
   if (!sourceKind || !targetKind || sourceKind !== targetKind) return false;
-  if (sourceKind === "other" && normalizeProjectName(source.detail || source.category || source.title) !== normalizeProjectName(target.detail || target.category || target.title)) {
-    return false;
-  }
   return true;
 }
 
@@ -1315,8 +1487,24 @@ function isProjectPlaceholderTask(task) {
   return rowType === normalizeProjectName("\ud504\ub85c\uc81d\ud2b8") || detail === normalizeProjectName("\ud504\ub85c\uc81d\ud2b8");
 }
 
-function projectKeyForProductionDedupe(task) {
-  return normalizeProjectName(resolveProjectAlias(task.channel, task.project || task.title));
+function projectKeyForProductionDedupe(task, store = {}) {
+  const channelKey = normalizeChannelName(task?.channel);
+  let projectKey = normalizeProjectName(resolveProjectAlias(task?.channel, task?.project || task?.title));
+  const visited = new Set();
+
+  for (let index = 0; index < 8 && channelKey && projectKey; index += 1) {
+    const visitKey = `${channelKey}:${projectKey}`;
+    if (visited.has(visitKey)) break;
+    visited.add(visitKey);
+    const alias = (store.projectAliases || []).find((item) =>
+      item.channelKey === channelKey &&
+      item.fromKey === projectKey
+    );
+    if (!alias?.toKey || alias.toKey === projectKey) break;
+    projectKey = normalizeProjectName(resolveProjectAlias(task?.channel, alias.to || alias.toKey));
+  }
+
+  return projectKey;
 }
 
 function scheduleKindKey(task) {
