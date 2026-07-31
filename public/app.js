@@ -46,6 +46,16 @@ const PINNED_CHANNELS = [
 ];
 const DEFAULT_PROJECT_ALIAS_RULES = [
   {
+    channel: "현대카드",
+    target: "알파벳 시리즈",
+    aliases: ["알파벳 시리즈_여고생의 첫 파인다이닝"],
+    contains: [
+      ["알파벳", "시리즈"],
+      ["여고생", "파인다이닝"],
+    ],
+    episodeSeries: true,
+  },
+  {
     channel: "존박",
     target: "에이티즈 스몰톡",
     aliases: ["에이티즈 홍중", "에이티즈 스몰토크", "ATEEZ Hongjoong", "홍중"],
@@ -1608,14 +1618,15 @@ function buildRows(tasks) {
   const channels = new Map();
 
   function ensureTaskProjectGroup(task) {
-    const channelName = task.channel || "미지정 채널";
+    const channelName = canonicalChannelDisplayName(task.channel);
+    const channelKey = channelGroupKey(channelName);
     const projectName = task.project || task.title || "새 프로젝트";
     const resolvedProjectName = projectNameForTask(task);
     const projectKey = canonicalProjectKey(resolvedProjectName);
-    if (!channels.has(channelName)) {
-      channels.set(channelName, { name: channelName, projects: new Map(), tasks: [] });
+    if (!channels.has(channelKey)) {
+      channels.set(channelKey, { name: channelName, projects: new Map(), tasks: [] });
     }
-    const channel = channels.get(channelName);
+    const channel = channels.get(channelKey);
     const resolvedProjectKey = ensureProjectGroup(channel.projects, projectKey, resolvedProjectName);
     if (!channel.projects.has(resolvedProjectKey)) {
       channel.projects.set(resolvedProjectKey, { key: resolvedProjectKey, name: resolvedProjectName, aliasName: resolvedProjectName, tasks: [] });
@@ -1635,11 +1646,12 @@ function buildRows(tasks) {
   }
 
   for (const stub of state.channelStubs || []) {
-    const channelName = stub.name || "미지정 채널";
+    const channelName = canonicalChannelDisplayName(stub.name);
+    const channelKey = channelGroupKey(channelName);
     if (isAutoHiddenTask({ channel: channelName })) continue;
     if (!hiddenStubMatchesCurrentView(stub)) continue;
-    if (!channels.has(channelName)) {
-      channels.set(channelName, {
+    if (!channels.has(channelKey)) {
+      channels.set(channelKey, {
         name: channelName,
         projects: new Map(),
         tasks: [],
@@ -1647,7 +1659,7 @@ function buildRows(tasks) {
         hiddenRange: { start: stub.start || todayString(), end: stub.end || stub.start || todayString() },
       });
     } else {
-      const channel = channels.get(channelName);
+      const channel = channels.get(channelKey);
       channel.hiddenTaskIds = [...new Set([...(channel.hiddenTaskIds || []), ...(stub.taskIds || [])])];
       channel.hiddenRange = channel.hiddenRange || { start: stub.start || todayString(), end: stub.end || stub.start || todayString() };
     }
@@ -1655,11 +1667,12 @@ function buildRows(tasks) {
 
   for (const pinned of PINNED_CHANNELS) {
     const channelName = pinned.name;
+    const channelKey = channelGroupKey(channelName);
     if (isClientHiddenChannel(channelName)) continue;
     if (isAutoHiddenTask({ channel: channelName })) continue;
     if (!hiddenStubMatchesCurrentView({ name: channelName, start: todayString(), end: todayString() })) continue;
-    if (channels.has(channelName)) continue;
-    channels.set(channelName, {
+    if (channels.has(channelKey)) continue;
+    channels.set(channelKey, {
       name: channelName,
       projects: new Map(),
       tasks: [],
@@ -2137,13 +2150,14 @@ function projectReviewGroups(tasks = state.tasks) {
   const channels = new Map();
 
   tasks.filter(isReviewableTask).forEach((task) => {
-    const channelName = task.channel || "미지정 채널";
+    const channelName = canonicalChannelDisplayName(task.channel);
+    const channelKey = channelGroupKey(channelName);
     const projectName = task.project || task.title || "새 프로젝트";
     const resolvedProject = projectNameForTask(task);
-    if (!channels.has(channelName)) {
-      channels.set(channelName, { name: channelName, projects: new Map() });
+    if (!channels.has(channelKey)) {
+      channels.set(channelKey, { name: channelName, projects: new Map() });
     }
-    const channel = channels.get(channelName);
+    const channel = channels.get(channelKey);
     const resolvedProjectKey = ensureProjectGroup(channel.projects, canonicalProjectKey(resolvedProject), resolvedProject);
     if (!channel.projects.has(resolvedProjectKey)) {
       channel.projects.set(resolvedProjectKey, { key: resolvedProjectKey, name: resolvedProject, aliasName: resolvedProject, tasks: [] });
@@ -2639,7 +2653,8 @@ function defaultProjectAliasName(channel, projectName) {
     const targetKey = canonicalProjectKey(rule.target);
     const aliasKeys = (rule.aliases || []).map(canonicalProjectKey);
     const containsMatch = (rule.contains || []).some((tokens) => tokens.every((token) => projectKey.includes(canonicalProjectKey(token))));
-    if (projectKey === targetKey || aliasKeys.includes(projectKey) || containsMatch) {
+    const episodeSeriesMatch = Boolean(rule.episodeSeries && /^ep\d+/.test(projectKey));
+    if (projectKey === targetKey || aliasKeys.includes(projectKey) || containsMatch || episodeSeriesMatch) {
       return rule.target;
     }
   }
@@ -3379,6 +3394,15 @@ function pinnedChannelKey(channel) {
 
 function sameChannelName(a, b) {
   return normalizeChannelName(a) === normalizeChannelName(b);
+}
+
+function channelGroupKey(value) {
+  return normalizeChannelName(value || "미지정 채널") || normalizeChannelName("미지정 채널");
+}
+
+function canonicalChannelDisplayName(value) {
+  const channelName = String(value || "").trim() || "미지정 채널";
+  return PINNED_CHANNELS.find((item) => sameChannelName(item.name, channelName))?.name || channelName;
 }
 
 function normalizeChannelName(value) {

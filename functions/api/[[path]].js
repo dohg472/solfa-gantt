@@ -38,6 +38,16 @@ const COLOR_LEGEND = {
 };
 const DEFAULT_PROJECT_ALIAS_RULES = [
   {
+    channel: "\ud604\ub300\uce74\ub4dc",
+    target: "\uc54c\ud30c\ubcb3 \uc2dc\ub9ac\uc988",
+    aliases: ["\uc54c\ud30c\ubcb3 \uc2dc\ub9ac\uc988_\uc5ec\uace0\uc0dd\uc758 \uccab \ud30c\uc778\ub2e4\uc774\ub2dd"],
+    contains: [
+      ["\uc54c\ud30c\ubcb3", "\uc2dc\ub9ac\uc988"],
+      ["\uc5ec\uace0\uc0dd", "\ud30c\uc778\ub2e4\uc774\ub2dd"],
+    ],
+    episodeSeries: true,
+  },
+  {
     channel: "\uc874\ubc15",
     target: "\uc5d0\uc774\ud2f0\uc988 \uc2a4\ubab0\ud1a1",
     aliases: ["\uc5d0\uc774\ud2f0\uc988 \ud64d\uc911", "\uc5d0\uc774\ud2f0\uc988 \uc2a4\ubab0\ud1a0\ud06c", "ATEEZ Hongjoong", "\ud64d\uc911"],
@@ -1375,7 +1385,8 @@ function defaultProjectAliasName(channel, projectName) {
     const targetKey = normalizeProjectName(rule.target);
     const aliasKeys = (rule.aliases || []).map(normalizeProjectName);
     const containsMatch = (rule.contains || []).some((tokens) => tokens.every((token) => projectKey.includes(normalizeProjectName(token))));
-    if (projectKey === targetKey || aliasKeys.includes(projectKey) || containsMatch) {
+    const episodeSeriesMatch = Boolean(rule.episodeSeries && /^ep\d+/.test(projectKey));
+    if (projectKey === targetKey || aliasKeys.includes(projectKey) || containsMatch || episodeSeriesMatch) {
       return rule.target;
     }
   }
