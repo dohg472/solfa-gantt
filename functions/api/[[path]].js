@@ -1,6 +1,7 @@
 const STORE_KEY = "solpa:gantt:store:v1";
 const TASK_CACHE_KEY = "solpa:gantt:tasks-cache:v1";
 const TASK_CACHE_MS = 5 * 60 * 1000;
+const COMPLETED_HIDE_GRACE_DAYS = 14;
 const ORIGIN_MARKER_PREFIX = "solpa-gantt-origin";
 const SYSTEM_CHANNEL = "__solpa_gantt_config__";
 const DEFAULT_ENV = {
@@ -271,6 +272,7 @@ async function getTasksPayload(env, request, options = {}) {
     channels: hiddenChannelSummaries([...sourceTasksRaw, ...targetTasksPrepared], store),
     hiddenChannels: store.hiddenChannels || [],
     hiddenProjects: store.hiddenProjects || [],
+    revealedProjects: store.revealedProjects || [],
     connection: {
       mode: "notion",
       read: Boolean(config(env).readDatabaseId),
@@ -318,6 +320,7 @@ function decorateTaskPayload(payload, store, request, env) {
     ...payload,
     hiddenChannels: store.hiddenChannels || [],
     hiddenProjects: store.hiddenProjects || [],
+    revealedProjects: store.revealedProjects || [],
     reviewIgnores: store.reviewIgnores || [],
     baseline: baselineSummary(store.baseline),
     sync: storeMeta(store),
@@ -477,6 +480,48 @@ function uniqueNormalizedProjectNames(values) {
   return [...new Set((values || []).map(normalizeProjectName).filter(Boolean))];
 }
 
+function projectVisibilityEntry(value = {}) {
+  const channel = normalizeChannelName(value.channel || value.name);
+  const projects = uniqueNormalizedProjectNames([
+    value.project,
+    ...(Array.isArray(value.projects) ? value.projects : []),
+  ]);
+  const taskIds = uniqueNormalizedLookupIds([
+    ...(Array.isArray(value.taskIds) ? value.taskIds : []),
+    ...(Array.isArray(value.ids) ? value.ids : []),
+  ]);
+  return {
+    channel,
+    project: projects[0] || "",
+    projects,
+    taskIds,
+    restoredAt: value.restoredAt || new Date().toISOString(),
+  };
+}
+
+function projectVisibilityEntriesOverlap(left, right) {
+  const a = projectVisibilityEntry(left);
+  const b = projectVisibilityEntry(right);
+  if (!a.channel || a.channel !== b.channel) return false;
+  if (a.taskIds.some((id) => b.taskIds.includes(id))) return true;
+  return a.projects.some((project) => b.projects.includes(project));
+}
+
+function addRevealedProject(store, value) {
+  const entry = projectVisibilityEntry(value);
+  if (!entry.channel || (!entry.project && !entry.taskIds.length)) return false;
+  const existing = (store.revealedProjects || []).find((item) => projectVisibilityEntriesOverlap(item, entry));
+  if (existing) {
+    existing.project = existing.project || entry.project;
+    existing.projects = uniqueNormalizedProjectNames([...(existing.projects || []), ...entry.projects]);
+    existing.taskIds = uniqueNormalizedLookupIds([...(existing.taskIds || []), ...entry.taskIds]);
+    existing.restoredAt = new Date().toISOString();
+  } else {
+    store.revealedProjects.push(entry);
+  }
+  return true;
+}
+
 async function hideProjectGroup(env, body) {
   const groups = projectHideGroupsFromBody(body);
   await mutateStore(env, (store) => {
@@ -496,6 +541,8 @@ async function hideProjectGroup(env, body) {
           projects: group.projects || [project],
         });
       }
+      store.revealedProjects = (store.revealedProjects || [])
+        .filter((item) => !projectVisibilityEntriesOverlap(item, group));
     }
     addActivity(store, { type: "hide", title: "프로젝트 숨김", count: groups.length });
   });
@@ -664,13 +711,26 @@ function changeRequestCounts(requests) {
 
 async function getHiddenState(env) {
   const store = await readStore(env);
+  const channels = (store.hiddenChannels || []).map((name) => ({ name }));
+  const projects = (store.hiddenProjects || []).map((item) => ({ ...item }));
+  const tasks = (store.hiddenNotionIds || []).map((id) => ({ id }));
+  const projectAliases = store.projectAliases || [];
+  const reviewIgnores = store.reviewIgnores || [];
   return {
-    channels: (store.hiddenChannels || []).map((name) => ({ name })),
-    projects: (store.hiddenProjects || []).map((item) => ({ ...item })),
-    tasks: (store.hiddenNotionIds || []).map((id) => ({ id })),
+    channels,
+    projects,
+    tasks,
     convertibleProjects: [],
-    projectAliases: store.projectAliases || [],
-    reviewIgnores: store.reviewIgnores || [],
+    projectAliases,
+    reviewIgnores,
+    counts: {
+      channels: channels.length,
+      projects: projects.length,
+      tasks: tasks.length,
+      convertibleProjects: 0,
+      projectAliases: projectAliases.length,
+      reviewIgnores: reviewIgnores.length,
+    },
   };
 }
 
@@ -684,6 +744,12 @@ async function restoreHiddenItem(env, body) {
       const channel = normalizeChannelName(body.channel);
       const project = normalizeProjectName(body.project);
       store.hiddenProjects = store.hiddenProjects.filter((item) => item.channel !== channel || item.project !== project);
+      store.hiddenChannels = store.hiddenChannels.filter((item) => item !== channel);
+      addRevealedProject(store, body);
+    } else if (mode === "auto-project") {
+      const channel = normalizeChannelName(body.channel);
+      store.hiddenChannels = store.hiddenChannels.filter((item) => item !== channel);
+      addRevealedProject(store, body);
     } else {
       const id = normalizeLookupId(body.id);
       store.hiddenNotionIds = store.hiddenNotionIds.filter((item) => item !== id);
@@ -1092,6 +1158,9 @@ function normalizeStore(store = {}) {
     hiddenNotionIds: Array.isArray(store.hiddenNotionIds) ? store.hiddenNotionIds.map(normalizeLookupId).filter(Boolean) : [],
     hiddenChannels: Array.isArray(store.hiddenChannels) ? store.hiddenChannels.map(normalizeChannelName).filter(Boolean) : [],
     hiddenProjects: Array.isArray(store.hiddenProjects) ? store.hiddenProjects : [],
+    revealedProjects: Array.isArray(store.revealedProjects)
+      ? store.revealedProjects.map(projectVisibilityEntry).filter((item) => item.channel && (item.project || item.taskIds.length))
+      : [],
     projectAliases: Array.isArray(store.projectAliases) ? store.projectAliases : [],
     reviewIgnores: Array.isArray(store.reviewIgnores) ? store.reviewIgnores : [],
     changeRequests: Array.isArray(store.changeRequests) ? store.changeRequests.slice(0, 300) : [],
@@ -1643,6 +1712,7 @@ function isCompletedUploadProject(tasks) {
   const latestUploadEnd = uploadTasks.reduce((max, task) => compareDate(task.end, max) > 0 ? task.end : max, uploadTasks[0].end);
   const uploadFinished = uploadTasks.some(isDoneTask) || compareDate(latestUploadEnd, todayString()) < 0;
   if (!uploadFinished) return false;
+  if (daysBetweenDates(latestUploadEnd, todayString()) <= COMPLETED_HIDE_GRACE_DAYS) return false;
   return !(tasks || []).some((task) => compareDate(task.end, latestUploadEnd) > 0 && !isDoneTask(task));
 }
 
@@ -1742,6 +1812,13 @@ function todayString() {
 
 function compareDate(a, b) {
   return String(a || "").localeCompare(String(b || ""));
+}
+
+function daysBetweenDates(start, end) {
+  const startTime = Date.parse(`${toDateOnly(start)}T00:00:00Z`);
+  const endTime = Date.parse(`${toDateOnly(end)}T00:00:00Z`);
+  if (!Number.isFinite(startTime) || !Number.isFinite(endTime)) return 0;
+  return Math.round((endTime - startTime) / 86400000);
 }
 
 function compareText(a, b) {

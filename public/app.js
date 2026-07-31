@@ -37,6 +37,7 @@ const FULL_SYNC_INTERVAL_MS = 300000;
 const SYNC_RETRY_INTERVAL_MS = 30000;
 const DEFAULT_COLLAPSED_REVIEW_SECTIONS = ["upload-only", "missing-upload", "completed"];
 const STALE_REVIEW_BACKLOG_DAYS = 14;
+const COMPLETED_HIDE_GRACE_DAYS = 14;
 const PINNED_CHANNELS = [
   { name: "현대카드" },
   { name: "Hup!" },
@@ -91,6 +92,9 @@ const state = {
   hiddenConvertibleProjects: [],
   hiddenProjectLeaks: [],
   hiddenProjects: [],
+  revealedProjects: [],
+  hiddenAutomaticProjects: [],
+  hiddenRestoreActions: [],
   groupRanges: {},
   groupNotes: {},
   rowOrder: [],
@@ -304,6 +308,7 @@ const els = {
   hiddenSummary: document.getElementById("hiddenSummary"),
   hiddenChannelsList: document.getElementById("hiddenChannelsList"),
   hiddenProjectsList: document.getElementById("hiddenProjectsList"),
+  hiddenAutomaticProjectsList: document.getElementById("hiddenAutomaticProjectsList"),
   hiddenConvertibleProjectsList: document.getElementById("hiddenConvertibleProjectsList"),
   hiddenTasksList: document.getElementById("hiddenTasksList"),
   projectAliasesList: document.getElementById("projectAliasesList"),
@@ -370,6 +375,16 @@ const els = {
   inputCancelButton: document.getElementById("inputCancelButton"),
   inputCancelIconButton: document.getElementById("inputCancelIconButton"),
   inputConfirmButton: document.getElementById("inputConfirmButton"),
+  hiddenRestoreModalBackdrop: document.getElementById("hiddenRestoreModalBackdrop"),
+  hiddenRestoreModal: document.getElementById("hiddenRestoreModal"),
+  hiddenRestoreTitle: document.getElementById("hiddenRestoreTitle"),
+  hiddenRestoreSummary: document.getElementById("hiddenRestoreSummary"),
+  hiddenRestoreForm: document.getElementById("hiddenRestoreForm"),
+  hiddenRestoreList: document.getElementById("hiddenRestoreList"),
+  hiddenRestoreSelectAll: document.getElementById("hiddenRestoreSelectAll"),
+  hiddenRestoreCancelButton: document.getElementById("hiddenRestoreCancelButton"),
+  hiddenRestoreCancelIconButton: document.getElementById("hiddenRestoreCancelIconButton"),
+  hiddenRestoreConfirmButton: document.getElementById("hiddenRestoreConfirmButton"),
   toast: document.getElementById("toast"),
 };
 
@@ -549,6 +564,12 @@ function bindEvents() {
     event.preventDefault();
     submitInputModal();
   });
+  els.hiddenRestoreModalBackdrop.addEventListener("click", closeHiddenRestoreModal);
+  els.hiddenRestoreCancelButton.addEventListener("click", closeHiddenRestoreModal);
+  els.hiddenRestoreCancelIconButton.addEventListener("click", closeHiddenRestoreModal);
+  els.hiddenRestoreSelectAll.addEventListener("change", toggleAllHiddenRestoreOptions);
+  els.hiddenRestoreList.addEventListener("change", syncHiddenRestoreSelectionState);
+  els.hiddenRestoreForm.addEventListener("submit", submitHiddenRestoreSelection);
   els.taskTable.addEventListener("pointerdown", (event) => startSelectionDrag(event, "table"));
   els.taskTable.addEventListener("pointerover", handleRowHoverStart);
   els.taskTable.addEventListener("pointerout", handleRowHoverEnd);
@@ -644,6 +665,11 @@ function handleEscapeCancel(event) {
     setPanMode(false);
     return true;
   }
+  if (!els.hiddenRestoreModal.hidden) {
+    markHandled();
+    closeHiddenRestoreModal();
+    return true;
+  }
   if (!els.inputModal.hidden) {
     markHandled();
     resolveInputModal(null);
@@ -736,7 +762,7 @@ function handleUndoRedoShortcut(event) {
 function keyboardNudgeBlocked(event) {
   if (!selectedTaskIds().length) return true;
   if (state.drag || state.dependencyDrag || state.selectionDrag || state.createDrag || state.timelineNavigatorDrag || state.panDrag) return true;
-  if (!els.inputModal.hidden || !els.impactModal.hidden) return true;
+  if (!els.inputModal.hidden || !els.impactModal.hidden || !els.hiddenRestoreModal.hidden) return true;
   if (!els.contextMenu.hidden) return true;
   if (els.moreToolsPanel && !els.moreToolsPanel.hidden) return true;
   if (document.querySelector(".range-popover") || document.querySelector(".meta-popover")) return true;
@@ -869,6 +895,7 @@ function canApplyIncomingViewPrefs() {
     !state.editorOpen &&
     !state.viewSettingsSaveTimer &&
     els.impactModal.hidden &&
+    els.hiddenRestoreModal.hidden &&
     !document.querySelector(".range-popover") &&
     !document.querySelector(".meta-popover")
   );
@@ -1204,6 +1231,7 @@ function isAutoSyncBusy() {
     state.isUndoing ||
     state.editorOpen ||
     !els.impactModal.hidden ||
+    !els.hiddenRestoreModal.hidden ||
     Boolean(document.querySelector(".range-popover")) ||
     Boolean(document.querySelector(".meta-popover"))
   );
@@ -1231,6 +1259,7 @@ async function loadTasks(options = {}) {
     state.channelStubs = data.channels || [];
     state.hiddenChannels = Array.isArray(data.hiddenChannels) ? data.hiddenChannels : [];
     state.hiddenProjects = Array.isArray(data.hiddenProjects) ? data.hiddenProjects : [];
+    state.revealedProjects = Array.isArray(data.revealedProjects) ? data.revealedProjects : [];
     state.projectAliases = data.projectAliases || [];
     state.reviewIgnores = data.reviewIgnores || [];
     state.hiddenProjectLeaks = Array.isArray(data.hiddenProjectLeaks) ? data.hiddenProjectLeaks : [];
@@ -1727,6 +1756,7 @@ function buildRows(tasks) {
             tasks: [],
             range: groupRangeForRow({ id: emptyChannelId, kind: "channel" }, emptyRange),
             emptyOnly: true,
+            restoreActions: hiddenRestoreActionsForChannel(channel, completedProjects, reviewBacklogProjects),
           };
         }
         const shouldKeepHiddenChannel = Boolean(channel.hiddenTaskIds?.length || isAlwaysVisibleChannel(channel.name));
@@ -1755,7 +1785,14 @@ function buildRows(tasks) {
       }
       const channelId = `channel:${channel.name}`;
       const naturalRange = rangeOf(visibleRangeTasks);
-      return { ...channel, projects, tasks: visibleTasks, rangeTasks: visibleRangeTasks, range: groupRangeForRow({ id: channelId, kind: "channel" }, naturalRange) };
+      return {
+        ...channel,
+        projects,
+        tasks: visibleTasks,
+        rangeTasks: visibleRangeTasks,
+        range: groupRangeForRow({ id: channelId, kind: "channel" }, naturalRange),
+        restoreActions: hiddenRestoreActionsForChannel(channel, completedProjects, reviewBacklogProjects),
+      };
     })
     .filter(Boolean)
     .sort((a, b) =>
@@ -1874,25 +1911,46 @@ function hiddenRestoreActionsForChannel(channel, completedProjects = [], reviewB
     actions.push({ type: "channel", channel: channel.name });
   }
 
-  (state.hiddenProjects || [])
-    .filter((item) => normalizeChannelName(item.channel) === normalizedChannel)
+  const channelHiddenProjects = (state.hiddenProjects || [])
+    .filter((item) => normalizeChannelName(item.channel) === normalizedChannel);
+  channelHiddenProjects
     .forEach((item) => {
-      if (item.project) actions.push({ type: "project", channel: item.channel || channel.name, project: item.project });
+      if (item.project) {
+        actions.push({
+          type: "project",
+          channel: item.channel || channel.name,
+          project: item.project,
+          projects: item.projects || [item.project],
+          taskIds: item.taskIds || [],
+          reason: "직접 숨김",
+        });
+      }
     });
 
-  (channel.hiddenTaskIds || []).forEach((id) => {
-    if (id) actions.push({ type: "task", id });
+  const projectTaskIds = new Set(
+    channelHiddenProjects.flatMap((item) => item.taskIds || []).map(hiddenLookupId).filter(Boolean),
+  );
+  (isClientHiddenChannel(channel.name) ? [] : channel.hiddenTaskIds || []).forEach((id) => {
+    if (projectTaskIds.has(hiddenLookupId(id))) return;
+    if (id) actions.push({ type: "task", id, channel: channel.name, reason: "개별 일정 숨김" });
   });
 
-  if (!actions.length && (completedProjects.length || reviewBacklogProjects.length)) {
-    actions.push({ type: "show-completed", channel: channel.name });
-  }
+  completedProjects
+    .filter((project) => !isProjectRevealed(project.tasks || []))
+    .forEach((project) => actions.push(autoHiddenRestoreAction(project, channel.name, "완료 자동 숨김")));
+  reviewBacklogProjects
+    .filter((project) => !isProjectRevealed(project.tasks || []))
+    .forEach((project) => actions.push(autoHiddenRestoreAction(project, channel.name, "기간 경과 자동 숨김")));
 
   return uniqueRestoreActions(actions);
 }
 
 function hiddenRestoreActionsForRow(row) {
-  if (!row?.hiddenOnly) return [];
+  if (!row) return [];
+  if (row.kind === "channel" && Array.isArray(row.restoreActions)) {
+    return uniqueRestoreActions(row.restoreActions);
+  }
+  if (!row.hiddenOnly) return [];
   if (Array.isArray(row.restoreActions) && row.restoreActions.length) return uniqueRestoreActions(row.restoreActions);
   const actions = [];
   if (row.kind === "channel" && isClientHiddenChannel(row.title)) {
@@ -1900,6 +1958,43 @@ function hiddenRestoreActionsForRow(row) {
   }
   taskIdsForRow(row).forEach((id) => actions.push({ type: "task", id }));
   return uniqueRestoreActions(actions);
+}
+
+function autoHiddenRestoreAction(project, channelName, reason) {
+  const tasks = project?.tasks || [];
+  const projectName = project?.project || projectDisplayNameForMatch(project) || project?.name || "프로젝트";
+  const range = tasks.length ? rangeOf(tasks) : project?.range || null;
+  return {
+    type: "auto-project",
+    channel: channelName || project?.channel || tasks[0]?.channel || "",
+    project: projectName,
+    projects: project?.sourceProjects || [...new Set(tasks.map((task) => task.project || task.title).filter(Boolean))],
+    taskIds: tasks.map((task) => task.id).filter(Boolean),
+    reason,
+    start: range?.start || "",
+    end: range?.end || "",
+  };
+}
+
+function isProjectRevealed(tasks) {
+  const list = tasks || [];
+  if (!list.length || !state.revealedProjects?.length) return false;
+  const channel = normalizeChannelName(list[0]?.channel || "");
+  const taskIds = new Set(list.flatMap((task) => [task.id, task.originId]).map(hiddenLookupId).filter(Boolean));
+  const taskKeys = list
+    .flatMap((task) => projectHideVariantsForTask(task, task.project || task.title || ""))
+    .flatMap((project) => [...projectAliasKeys(canonicalProjectKey(project))])
+    .filter(Boolean);
+
+  return state.revealedProjects.some((entry) => {
+    if (normalizeChannelName(entry.channel) !== channel) return false;
+    const entryIds = [...(entry.taskIds || []), ...(entry.ids || [])].map(hiddenLookupId).filter(Boolean);
+    if (entryIds.some((id) => taskIds.has(id))) return true;
+    const entryKeys = [entry.project, ...(entry.projects || [])]
+      .flatMap((project) => [...projectAliasKeys(canonicalProjectKey(project))])
+      .filter(Boolean);
+    return projectKeySetsOverlap(taskKeys, entryKeys);
+  });
 }
 
 function uniqueRestoreActions(actions) {
@@ -2024,6 +2119,7 @@ function isCompletedUploadProject(tasks) {
   const latestUploadEnd = uploadTasks.reduce((max, task) => (compareDate(task.end, max) > 0 ? task.end : max), uploadTasks[0].end);
   const uploadFinished = uploadTasks.some(isDoneTask) || compareDate(latestUploadEnd, todayString()) < 0;
   if (!uploadFinished) return false;
+  if (daysBetween(latestUploadEnd, todayString()) <= COMPLETED_HIDE_GRACE_DAYS) return false;
 
   return !tasks.some((task) => compareDate(task.end, latestUploadEnd) > 0 && !isDoneTask(task));
 }
@@ -2036,6 +2132,7 @@ function shouldShowProjectInCurrentView(tasks, project = null, siblingProjects =
   if (state.showCompleted) return true;
   if (state.filters.issue === "completed") return true;
   if (["upload-only", "missing-upload", "issue"].includes(state.filters.issue)) return true;
+  if (isProjectRevealed(tasks)) return true;
   if (shouldHideReviewBacklogByDefault(tasks, project, siblingProjects)) return false;
   return !shouldHideProjectByDefault(tasks);
 }
@@ -2223,11 +2320,15 @@ function projectReviewReport() {
 }
 
 function defaultHiddenProjectGroups(tasks = state.tasks) {
-  return projectReviewGroups(tasks).filter((group) => shouldHideProjectByDefault(group.tasks || []));
+  return projectReviewGroups(tasks)
+    .filter((group) => shouldHideProjectByDefault(group.tasks || []))
+    .filter((group) => !isProjectRevealed(group.tasks || []));
 }
 
 function defaultReviewBacklogProjectGroups(tasks = state.tasks) {
-  return projectReviewGroups(tasks).filter((group) => shouldHideReviewBacklogByDefault(group.tasks || []));
+  return projectReviewGroups(tasks)
+    .filter((group) => shouldHideReviewBacklogByDefault(group.tasks || []))
+    .filter((group) => !isProjectRevealed(group.tasks || []));
 }
 
 function groupsCoveredBySimilarIssueCandidates(candidates) {
@@ -3077,7 +3178,7 @@ function projectVisibilityState(tasks) {
       kind: "completed",
       label: "업로드 완료",
       tone: "ok",
-      reason: `업로드가 ${dateLabel(latestUploadEnd)}까지 끝나 기본 숨김 대상입니다`,
+      reason: `업로드가 ${dateLabel(latestUploadEnd)}에 끝난 뒤 2주가 지나 기본 숨김 대상입니다`,
       hiddenByDefault: true,
       composition,
     };
@@ -4931,6 +5032,7 @@ function openRowContext(event, row, date = "") {
     canMerge: canMergeContextProjects(useSelection ? "selection" : row.kind, taskIds),
     canDone: tasksForIds(taskIds).some((task) => !isDoneTask(task)),
     canRestore: !useSelection && restoreActions.length > 0,
+    restoreOnly: Boolean(row.hiddenOnly),
     hasDate: Boolean(date),
     kind: state.context.kind,
   });
@@ -4946,11 +5048,12 @@ function showContextMenu(x, y, options) {
   els.contextEditButton.hidden = !options.canEdit;
   els.contextDoneButton.hidden = !options.canDone;
   els.contextRestoreButton.hidden = !options.canRestore;
+  els.contextRestoreButton.textContent = options.kind === "channel" ? "숨김 해제" : "숨김 복구";
   els.contextDoneButton.textContent = contextActionLabel(options.kind, "완료 처리");
   els.contextHideButton.textContent = contextActionLabel(options.kind, "숨기기");
-  els.contextHideButton.hidden = Boolean(options.canRestore);
+  els.contextHideButton.hidden = Boolean(options.restoreOnly);
   els.contextDeleteButton.textContent = contextActionLabel(options.kind, "삭제");
-  els.contextDeleteButton.hidden = Boolean(options.canRestore);
+  els.contextDeleteButton.hidden = Boolean(options.restoreOnly);
   els.contextDateDivider.hidden = !options.hasDate;
   [els.contextMoveButton, els.contextStartButton, els.contextEndButton].forEach((button) => {
     button.hidden = !options.hasDate;
@@ -5291,7 +5394,6 @@ async function hideContextItems() {
 async function restoreContextHiddenItem() {
   const context = state.context;
   if (!context) return;
-  hideContextMenu();
   const actions = context.restoreActions?.length
     ? context.restoreActions
     : [
@@ -5302,6 +5404,11 @@ async function restoreContextHiddenItem() {
           id: context.taskId || context.taskIds?.[0] || "",
         },
       ];
+  hideContextMenu();
+  if (context.kind === "channel" && actions.length) {
+    openHiddenRestoreModal(context.title || context.channel, actions);
+    return;
+  }
   if (!(await confirmRestoreHiddenPreview(actions[0], context.title, contextSummary(context) || context.summary))) return;
   try {
     const remoteActions = [];
@@ -5320,6 +5427,109 @@ async function restoreContextHiddenItem() {
     if (!els.hiddenPanel.hidden) await loadHiddenState();
     showToast("숨김을 복구했습니다.");
   } catch (error) {
+    showToast(error.message);
+  }
+}
+
+function openHiddenRestoreModal(channel, actions) {
+  const items = uniqueRestoreActions(actions).filter((action) => action?.type);
+  if (!items.length) {
+    showToast("복구할 숨김 프로젝트가 없습니다.");
+    return;
+  }
+  state.hiddenRestoreActions = items;
+  els.hiddenRestoreTitle.textContent = `${channel || "채널"} 숨김 해제`;
+  els.hiddenRestoreSummary.textContent = `숨겨진 항목 ${items.length}개 중 다시 표시할 프로젝트를 선택하세요.`;
+  els.hiddenRestoreList.innerHTML = items.map(hiddenRestoreOptionMarkup).join("");
+  els.hiddenRestoreSelectAll.checked = false;
+  els.hiddenRestoreSelectAll.indeterminate = false;
+  els.hiddenRestoreConfirmButton.disabled = true;
+  els.hiddenRestoreConfirmButton.textContent = "선택 항목 복구";
+  els.hiddenRestoreModal.hidden = false;
+  els.hiddenRestoreModalBackdrop.hidden = false;
+  els.hiddenRestoreList.querySelector("input")?.focus();
+}
+
+function closeHiddenRestoreModal() {
+  els.hiddenRestoreModal.hidden = true;
+  els.hiddenRestoreModalBackdrop.hidden = true;
+  els.hiddenRestoreList.innerHTML = "";
+  state.hiddenRestoreActions = [];
+}
+
+function hiddenRestoreOptionMarkup(action, index) {
+  const title = action.type === "channel"
+    ? action.channel
+    : action.type === "task"
+      ? `개별 일정 ${String(action.id || "").slice(0, 8)}`
+      : action.project || "프로젝트";
+  const range = action.start && action.end ? dateRangeLabel(action) : "";
+  const meta = [action.reason || hiddenRestoreReasonLabel(action.type), range].filter(Boolean).join(" · ");
+  return `
+    <label class="hidden-restore-option">
+      <input type="checkbox" name="hiddenRestoreItem" value="${index}" />
+      <span class="hidden-restore-option-copy">
+        <span class="hidden-restore-option-title">${escapeHtml(title || "숨김 항목")}</span>
+        <span class="hidden-restore-option-meta">${escapeHtml(meta)}</span>
+      </span>
+    </label>
+  `;
+}
+
+function hiddenRestoreReasonLabel(type) {
+  if (type === "channel") return "채널 자체 숨김";
+  if (type === "project") return "직접 숨김";
+  if (type === "auto-project") return "자동 숨김";
+  return "개별 일정 숨김";
+}
+
+function hiddenRestoreCheckboxes() {
+  return [...els.hiddenRestoreList.querySelectorAll('input[name="hiddenRestoreItem"]')];
+}
+
+function toggleAllHiddenRestoreOptions() {
+  hiddenRestoreCheckboxes().forEach((checkbox) => {
+    checkbox.checked = els.hiddenRestoreSelectAll.checked;
+  });
+  syncHiddenRestoreSelectionState();
+}
+
+function syncHiddenRestoreSelectionState() {
+  const checkboxes = hiddenRestoreCheckboxes();
+  const selectedCount = checkboxes.filter((checkbox) => checkbox.checked).length;
+  els.hiddenRestoreSelectAll.checked = Boolean(checkboxes.length && selectedCount === checkboxes.length);
+  els.hiddenRestoreSelectAll.indeterminate = selectedCount > 0 && selectedCount < checkboxes.length;
+  els.hiddenRestoreConfirmButton.disabled = selectedCount === 0;
+  els.hiddenRestoreConfirmButton.textContent = selectedCount ? `${selectedCount}개 복구` : "선택 항목 복구";
+}
+
+async function submitHiddenRestoreSelection(event) {
+  event.preventDefault();
+  const selectedActions = hiddenRestoreCheckboxes()
+    .filter((checkbox) => checkbox.checked)
+    .map((checkbox) => state.hiddenRestoreActions[Number(checkbox.value)])
+    .filter(Boolean);
+  if (!selectedActions.length) {
+    showToast("복구할 프로젝트를 선택하세요.");
+    return;
+  }
+
+  els.hiddenRestoreConfirmButton.disabled = true;
+  try {
+    for (const action of selectedActions) {
+      if (action.type === "show-completed") {
+        state.showCompleted = true;
+        continue;
+      }
+      await restoreHidden(action);
+    }
+    closeHiddenRestoreModal();
+    saveViewPrefs();
+    await loadTasks();
+    if (!els.hiddenPanel.hidden) await loadHiddenState();
+    showToast(`${selectedActions.length}개 숨김을 해제했습니다.`);
+  } catch (error) {
+    els.hiddenRestoreConfirmButton.disabled = false;
     showToast(error.message);
   }
 }
@@ -5502,6 +5712,7 @@ async function hideProjectGroups(groups, label = "선택 프로젝트") {
 
   const previousTasks = state.tasks;
   const previousStubs = state.channelStubs;
+  const previousRevealedProjects = state.revealedProjects;
   const hiddenTasks = tasksMatchingProjectGroups(previousTasks, normalizedGroups);
   const ids = new Set(hiddenTasks.map((task) => task.id));
   const restoreProjects = normalizedGroups.map((group) => ({
@@ -5521,6 +5732,9 @@ async function hideProjectGroups(groups, label = "선택 프로젝트") {
   }))) return;
 
   state.tasks = state.tasks.filter((task) => !ids.has(task.id));
+  state.revealedProjects = state.revealedProjects.filter(
+    (entry) => !normalizedGroups.some((group) => revealedEntryMatchesProjectGroup(entry, group)),
+  );
   state.channelStubs = channelStubsAfterHide(previousStubs, hiddenTasks, state.tasks);
   state.selectedIds.clear();
   state.selectedId = "";
@@ -5548,9 +5762,24 @@ async function hideProjectGroups(groups, label = "선택 프로젝트") {
   } catch (error) {
     state.tasks = previousTasks;
     state.channelStubs = previousStubs;
+    state.revealedProjects = previousRevealedProjects;
     render();
     showToast(error.message);
   }
+}
+
+function revealedEntryMatchesProjectGroup(entry, group) {
+  if (!entry || !group || !sameChannelName(entry.channel, group.channel)) return false;
+  const entryIds = new Set([...(entry.taskIds || []), ...(entry.ids || [])].map(hiddenLookupId).filter(Boolean));
+  const groupIds = [...(group.ids || []), ...(group.taskIds || [])].map(hiddenLookupId).filter(Boolean);
+  if (groupIds.some((id) => entryIds.has(id))) return true;
+  const entryKeys = [entry.project, ...(entry.projects || [])]
+    .flatMap((project) => [...projectAliasKeys(canonicalProjectKey(project))])
+    .filter(Boolean);
+  const groupKeys = [group.project, ...(group.projects || [])]
+    .flatMap((project) => [...projectAliasKeys(canonicalProjectKey(project))])
+    .filter(Boolean);
+  return projectKeySetsOverlap(entryKeys, groupKeys);
 }
 
 function normalizeProjectGroups(groups) {
@@ -6493,7 +6722,11 @@ async function confirmCreateProjectPreview(project) {
 }
 
 async function confirmRestoreHiddenPreview(body, title, meta) {
-  const kindLabel = body?.type === "channel" ? "채널" : body?.type === "project" ? "프로젝트" : "일정";
+  const kindLabel = body?.type === "channel"
+    ? "채널"
+    : ["project", "auto-project"].includes(body?.type)
+      ? "프로젝트"
+      : "일정";
   const itemTitle = title || body?.project || body?.channel || body?.id || "숨김 항목";
   return openActionPreview({
     title: `${kindLabel} 숨김 복구 확인`,
@@ -9911,6 +10144,7 @@ async function loadHiddenState() {
   els.hiddenSummary.textContent = "불러오는 중";
   els.hiddenChannelsList.innerHTML = hiddenEmptyMarkup("불러오는 중");
   els.hiddenProjectsList.innerHTML = hiddenEmptyMarkup("불러오는 중");
+  els.hiddenAutomaticProjectsList.innerHTML = hiddenEmptyMarkup("불러오는 중");
   els.hiddenConvertibleProjectsList.innerHTML = hiddenEmptyMarkup("불러오는 중");
   els.hiddenTasksList.innerHTML = hiddenEmptyMarkup("불러오는 중");
   els.projectAliasesList.innerHTML = hiddenEmptyMarkup("불러오는 중");
@@ -9925,6 +10159,7 @@ async function loadHiddenState() {
     els.hiddenSummary.textContent = "불러오지 못했습니다";
     els.hiddenChannelsList.innerHTML = hiddenEmptyMarkup(error.message);
     els.hiddenProjectsList.innerHTML = "";
+    els.hiddenAutomaticProjectsList.innerHTML = "";
     els.hiddenConvertibleProjectsList.innerHTML = "";
     els.hiddenTasksList.innerHTML = "";
     els.projectAliasesList.innerHTML = "";
@@ -9934,14 +10169,53 @@ async function loadHiddenState() {
 
 function renderHiddenState(data) {
   const counts = data.counts || {};
+  const automaticProjects = automaticHiddenRestoreActions();
   state.hiddenConvertibleProjects = Array.isArray(data.convertibleProjects) ? data.convertibleProjects : [];
-  els.hiddenSummary.textContent = `채널 ${counts.channels || 0} · 프로젝트 ${counts.projects || 0} · 전환 ${counts.convertibleProjects || 0} · 일정 ${counts.tasks || 0} · 병합 ${counts.projectAliases || 0} · 검토 확인 ${counts.reviewIgnores || 0}`;
+  state.hiddenAutomaticProjects = automaticProjects;
+  const hiddenTotal = Number(counts.channels || 0) + Number(counts.projects || 0) + Number(counts.tasks || 0) + automaticProjects.length;
+  els.hiddenSummary.textContent = `전체 ${hiddenTotal} · 채널 ${counts.channels || 0} · 직접 숨긴 프로젝트 ${counts.projects || 0} · 자동 숨김 프로젝트 ${automaticProjects.length} · 일정 ${counts.tasks || 0}`;
   els.hiddenChannelsList.innerHTML = hiddenChannelMarkup(data.channels || []);
   els.hiddenProjectsList.innerHTML = hiddenProjectMarkup(data.projects || []);
+  els.hiddenAutomaticProjectsList.innerHTML = hiddenAutomaticProjectMarkup(automaticProjects);
   els.hiddenConvertibleProjectsList.innerHTML = hiddenConvertibleProjectMarkup(data.convertibleProjects || []);
   els.hiddenTasksList.innerHTML = hiddenTaskMarkup(data.tasks || []);
   els.projectAliasesList.innerHTML = projectAliasMarkup(data.projectAliases || []);
   els.reviewIgnoresList.innerHTML = reviewIgnoreMarkup(data.reviewIgnores || []);
+}
+
+function automaticHiddenRestoreActions() {
+  const completed = defaultHiddenProjectGroups(state.tasks)
+    .map((group) => autoHiddenRestoreAction(group, group.channel, "완료 자동 숨김"));
+  const reviewBacklog = defaultReviewBacklogProjectGroups(state.tasks)
+    .map((group) => autoHiddenRestoreAction(group, group.channel, "기간 경과 자동 숨김"));
+  return uniqueRestoreActions([...completed, ...reviewBacklog])
+    .sort((a, b) => compareText(a.channel, b.channel) || compareDate(b.end, a.end) || compareText(a.project, b.project));
+}
+
+function hiddenAutomaticProjectMarkup(projects) {
+  if (!projects.length) return hiddenEmptyMarkup("없음");
+  return projects
+    .map((item) => {
+      const range = item.start && item.end ? dateRangeLabel(item) : "";
+      const meta = [item.channel, item.reason, range].filter(Boolean).join(" · ");
+      return `
+        <div class="hidden-item">
+          <span>
+            <span class="hidden-item-title">${escapeHtml(item.project || "프로젝트")}</span>
+            <span class="hidden-item-meta">${escapeHtml(meta)}</span>
+          </span>
+          <span class="hidden-item-actions">
+            <button type="button"
+              data-restore-type="auto-project"
+              data-channel="${escapeHtml(item.channel || "")}"
+              data-project="${escapeHtml(item.project || "")}"
+              data-projects="${escapeHtml(JSON.stringify(item.projects || []))}"
+              data-task-ids="${escapeHtml(JSON.stringify(item.taskIds || []))}">복구</button>
+          </span>
+        </div>
+      `;
+    })
+    .join("");
 }
 
 function hiddenChannelMarkup(channels) {
@@ -10110,6 +10384,16 @@ function hiddenEmptyMarkup(text) {
   return `<div class="hidden-empty">${escapeHtml(text)}</div>`;
 }
 
+function parseDatasetArray(value) {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
 async function handleHiddenPanelClick(event) {
   const bulkConvertButton = event.target.closest("[data-hidden-project-convert-all]");
   if (bulkConvertButton) {
@@ -10143,6 +10427,8 @@ async function handleHiddenPanelClick(event) {
     channel: button.dataset.channel,
     project: button.dataset.project,
     id: button.dataset.id,
+    projects: parseDatasetArray(button.dataset.projects),
+    taskIds: parseDatasetArray(button.dataset.taskIds),
   };
   const item = button.closest(".hidden-item");
   const title = item?.querySelector(".hidden-item-title")?.textContent?.trim() || "";

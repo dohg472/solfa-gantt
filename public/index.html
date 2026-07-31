@@ -4,8 +4,8 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>솔파 간트</title>
-    <link rel="stylesheet" href="/styles.css?v=20260710-productivity-pass" />
-    <script src="/app.js?v=20260731-hyundai-series" defer></script>
+    <link rel="stylesheet" href="/styles.css?v=20260731-hidden-restore" />
+    <script src="/app.js?v=20260731-hidden-restore" defer></script>
   </head>
   <body>
     <div class="app">
@@ -311,6 +311,10 @@
           <div id="hiddenProjectsList" class="hidden-list"></div>
         </section>
         <section class="hidden-section">
+          <h3>자동 숨김 프로젝트</h3>
+          <div id="hiddenAutomaticProjectsList" class="hidden-list"></div>
+        </section>
+        <section class="hidden-section">
           <h3>프로젝트 전환</h3>
           <div id="hiddenConvertibleProjectsList" class="hidden-list"></div>
         </section>
@@ -504,6 +508,28 @@
           <div class="impact-actions">
             <button id="inputCancelButton" class="ghost-button" type="button">취소</button>
             <button id="inputConfirmButton" class="primary-button" type="submit">저장</button>
+          </div>
+        </form>
+      </section>
+      <div id="hiddenRestoreModalBackdrop" class="modal-backdrop" hidden></div>
+      <section id="hiddenRestoreModal" class="input-modal hidden-restore-modal" role="dialog" aria-modal="true" aria-labelledby="hiddenRestoreTitle" hidden>
+        <div class="impact-head">
+          <div>
+            <span class="source-badge">숨김 해제</span>
+            <h2 id="hiddenRestoreTitle">숨긴 프로젝트 선택</h2>
+          </div>
+          <button id="hiddenRestoreCancelIconButton" class="icon-button" title="취소" aria-label="취소" type="button">×</button>
+        </div>
+        <p id="hiddenRestoreSummary" class="impact-summary">다시 표시할 프로젝트를 선택하세요.</p>
+        <form id="hiddenRestoreForm" class="hidden-restore-form">
+          <label class="hidden-restore-select-all">
+            <input id="hiddenRestoreSelectAll" type="checkbox" />
+            <span>전체 선택</span>
+          </label>
+          <div id="hiddenRestoreList" class="hidden-restore-list"></div>
+          <div class="impact-actions">
+            <button id="hiddenRestoreCancelButton" class="ghost-button" type="button">취소</button>
+            <button id="hiddenRestoreConfirmButton" class="primary-button" type="submit">선택 항목 복구</button>
           </div>
         </form>
       </section>
