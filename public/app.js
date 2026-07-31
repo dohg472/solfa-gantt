@@ -42,6 +42,7 @@ const PINNED_CHANNELS = [
   { name: "Hup!" },
   { name: "ODG" },
   { name: "film94" },
+  { name: "칠성" },
 ];
 const DEFAULT_PROJECT_ALIAS_RULES = [
   {
