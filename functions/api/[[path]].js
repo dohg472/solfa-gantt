@@ -229,14 +229,19 @@ async function getTasksPayload(env, request, options = {}) {
     return decorateTaskPayload(cache.payload, store, request, env);
   }
 
-  const [readSchema, writeSchema, sourcePages, targetPages] = await Promise.all([
-    getDatabaseSchema(env, config(env).readDatabaseId, "read"),
-    getDatabaseSchema(env, config(env).writeDatabaseId, "write"),
-    queryDatabase(env, config(env).readDatabaseId),
-    queryDatabase(env, config(env).writeDatabaseId),
+  const [[readSchema, sourcePages], targetSnapshot] = await Promise.all([
+    Promise.all([
+      getDatabaseSchema(env, config(env).readDatabaseId, "read"),
+      queryDatabase(env, config(env).readDatabaseId),
+    ]),
+    loadOptionalDatabase(env, config(env).writeDatabaseId, "write"),
   ]);
+  const writeSchema = targetSnapshot.schema;
+  const targetPages = targetSnapshot.pages;
 
-  const targetTasksRaw = targetPages.flatMap((page) => pageToTask(page, writeSchema, "target"));
+  const targetTasksRaw = writeSchema
+    ? targetPages.flatMap((page) => pageToTask(page, writeSchema, "target"))
+    : [];
   const mappedOriginsByTargetId = originIdsByTargetId(store.writeMap);
   for (const task of targetTasksRaw) {
     const originId = task.originId || findOriginMarker(task.description);
@@ -276,11 +281,17 @@ async function getTasksPayload(env, request, options = {}) {
     connection: {
       mode: "notion",
       read: Boolean(config(env).readDatabaseId),
-      write: Boolean(config(env).writeDatabaseId),
+      write: targetSnapshot.available,
+      writeMode: targetSnapshot.available ? "target" : "disabled",
+      status: targetSnapshot.available ? "connected" : "read-only",
       source: "채널팀 플랜",
-      target: "간트_확인",
+      target: targetSnapshot.available ? "간트_확인" : "",
+      writeError: targetSnapshot.error,
     },
-    diagnostics: diagnosticsFor(tasks, sourcePages.length, targetPages.length, store),
+    diagnostics: diagnosticsFor(tasks, sourcePages.length, targetPages.length, store, {
+      targetAvailable: targetSnapshot.available,
+      targetError: targetSnapshot.error,
+    }),
     quality: [],
     baseline: baselineSummary(store.baseline),
     hiddenProjectLeaks: [],
@@ -302,8 +313,8 @@ async function getTasksPayload(env, request, options = {}) {
       readDatabaseId: config(env).readDatabaseId,
       writeDatabaseId: config(env).writeDatabaseId,
       sourceReadOnly: true,
-      creates: "target",
-      updates: "target-upsert",
+      creates: targetSnapshot.available ? "target" : "disabled",
+      updates: targetSnapshot.available ? "target-upsert" : "disabled",
     },
     viewSettings: store.viewSettings || null,
     projectAliases: store.projectAliases || [],
@@ -313,6 +324,27 @@ async function getTasksPayload(env, request, options = {}) {
 
   await writeTaskCache(env, payload, now + TASK_CACHE_MS);
   return payload;
+}
+
+async function loadOptionalDatabase(env, databaseId, kind) {
+  if (!databaseId) {
+    return { schema: null, pages: [], available: false, error: `${kind} database id is missing.` };
+  }
+
+  try {
+    const [schema, pages] = await Promise.all([
+      getDatabaseSchema(env, databaseId, kind),
+      queryDatabase(env, databaseId),
+    ]);
+    return { schema, pages, available: true, error: "" };
+  } catch (error) {
+    return {
+      schema: null,
+      pages: [],
+      available: false,
+      error: String(error?.message || error || `${kind} database is unavailable.`),
+    };
+  }
 }
 
 function decorateTaskPayload(payload, store, request, env) {
@@ -797,7 +829,7 @@ async function getSyncStatus(env) {
   };
 }
 
-function diagnosticsFor(tasks, sourceCount, targetCount, store) {
+function diagnosticsFor(tasks, sourceCount, targetCount, store, options = {}) {
   const projectAudit = projectAuditFor(tasks);
   return {
     sourceTasks: sourceCount,
@@ -824,7 +856,14 @@ function diagnosticsFor(tasks, sourceCount, targetCount, store) {
     markedCopies: tasks.filter((task) => task.originId).length,
     productionSetup: { available: false },
     startupTask: { installed: true, detail: "Cloudflare Pages 고정 주소로 배포됩니다." },
-    writeHealth: { healthy: true, mappedCopies: Object.keys(store.writeMap || {}).length, targetPages: targetCount, localTasks: 0, unmappedOverrides: 0 },
+    writeHealth: {
+      healthy: options.targetAvailable !== false,
+      error: options.targetError || "",
+      mappedCopies: Object.keys(store.writeMap || {}).length,
+      targetPages: targetCount,
+      localTasks: 0,
+      unmappedOverrides: 0,
+    },
     baseline: baselineSummary(store.baseline),
     sourceReadOnly: true,
     allowTargetArchive: false,
