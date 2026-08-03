@@ -1357,7 +1357,17 @@ function render() {
   const workloadRisks = workloadRisksForRows(baseRows);
   annotateRowsWithWorkloadRisks(baseRows, workloadRisks);
   state.rows = applyRiskRowFilter(baseRows, state.filters.risk);
-  const range = calculateRange(state.rows);
+  const calculatedRange = calculateRange(state.rows);
+  const preserveQuickFilterRange =
+    ["missing-upload", "missing-shoot"].includes(state.filters.issue) &&
+    state.rangeStart &&
+    state.rangeEnd;
+  const range = preserveQuickFilterRange
+    ? {
+        start: compareDate(state.rangeStart, calculatedRange.start) < 0 ? state.rangeStart : calculatedRange.start,
+        end: compareDate(state.rangeEnd, calculatedRange.end) > 0 ? state.rangeEnd : calculatedRange.end,
+      }
+    : calculatedRange;
   state.rangeStart = range.start;
   state.rangeEnd = range.end;
 
@@ -2363,6 +2373,50 @@ function projectReviewGroups(tasks = state.tasks) {
   });
 
   return groups;
+}
+
+function activeQuickFilterProjectGroups(tasks = state.tasks) {
+  const groups = projectReviewGroups(tasks);
+  const projectsByChannel = new Map();
+
+  groups.forEach((group) => {
+    const channelKey = normalizeChannelName(group.channel);
+    if (!projectsByChannel.has(channelKey)) projectsByChannel.set(channelKey, []);
+    projectsByChannel.get(channelKey).push({
+      ...group,
+      name: group.project,
+      aliasName: group.project,
+    });
+  });
+
+  return groups.filter((group) => {
+    const channelKey = normalizeChannelName(group.channel);
+    const project = {
+      ...group,
+      name: group.project,
+      aliasName: group.project,
+    };
+    return isCurrentQuickFilterProject(project, projectsByChannel.get(channelKey) || []);
+  });
+}
+
+function isCurrentQuickFilterProject(project, siblingProjects = []) {
+  const tasks = project?.tasks || [];
+  if (!tasks.length) return false;
+  if (isClientHiddenChannel(project.channel || tasks[0]?.channel || "")) return false;
+  if ((state.hiddenProjects || []).some((entry) => tasks.some((task) => taskMatchesProjectGroup(task, entry)))) return false;
+  if (shouldHideReviewBacklogByDefault(tasks, project, siblingProjects)) return false;
+  return !shouldHideProjectByDefault(tasks);
+}
+
+function activeQuickFilterTaskIds(filter, tasks = state.tasks) {
+  const ids = new Set();
+  activeQuickFilterProjectGroups(tasks)
+    .filter((group) => projectMatchesIssueFilter(group.tasks, filter))
+    .forEach((group) => {
+      group.tasks.forEach((task) => ids.add(task.id));
+    });
+  return ids;
 }
 
 function projectReviewReport() {
@@ -3730,7 +3784,7 @@ function renderOpsSummary({ dependencyConflicts = [], workloadRisks = [] } = {})
     return;
   }
 
-  const groups = projectReviewGroups();
+  const groups = activeQuickFilterProjectGroups();
   const missingUploadProjects = groups.filter((group) => isMissingUploadProject(group.tasks)).length;
   const missingShootProjects = groups.filter((group) => isMissingShootProject(group.tasks)).length;
   const hasActiveView = activeFilterLabels().length > 0;
@@ -4570,11 +4624,15 @@ function renderBars(rows, dayWidth, criticalTaskIds) {
 
     if (row.kind === "task") {
       bar.dataset.taskId = row.task.id;
-      const taskLabel = taskBarLabel(row);
+      const episodeLabel = taskBarEpisodeLabel(row);
+      const taskLabel = episodeLabel || taskBarLabel(row);
+      bar.classList.toggle("has-episode-label", Boolean(episodeLabel));
       bar.classList.toggle("is-label-hidden", !taskLabel);
       bar.innerHTML = `
         <span class="bar-progress"></span>
-        <span class="bar-label">${escapeHtml(taskLabel)}</span>
+        ${episodeLabel
+          ? `<span class="bar-label-outside bar-episode-label">${escapeHtml(episodeLabel)}</span>`
+          : `<span class="bar-label">${escapeHtml(taskLabel)}</span>`}
         <span class="dependency-dot left" data-dependency-side="left" title="선행 연결"></span>
         <span class="dependency-dot right" data-dependency-side="right" title="후속 연결"></span>
         <span class="bar-handle left" data-mode="resize-start" title="시작일 조정"></span>
@@ -4752,6 +4810,12 @@ function taskBarLabel(row) {
   const text = [row.title, row.task?.detail, row.task?.category].filter(Boolean).join(" ");
   if (/(촬영|업로드|릴리즈|게시|발행)/.test(text)) return "";
   return row.title;
+}
+
+function taskBarEpisodeLabel(row) {
+  if (!row?.task || !isUploadTask(row.task)) return "";
+  const match = String(row.title || "").match(/EP\.?\s*\d+(?:\s*-\s*\d+)?/i);
+  return match ? match[0].replace(/\s+/g, "").replace(/^EP(?=\d)/i, "EP.") : "";
 }
 
 function shouldUseOutsideProjectLabel(row, width, clippedEnd) {
@@ -11702,7 +11766,14 @@ function selectedTask() {
 
 function filteredTasks() {
   const query = String(state.search || "").trim().toLowerCase();
-  const baseTasks = state.tasks.filter((task) => taskMatchesQuery(task, query) && taskMatchesNonDateFilters(task));
+  const quickIssueFilter = ["missing-upload", "missing-shoot"].includes(state.filters.issue);
+  const quickFilterIds = quickIssueFilter ? activeQuickFilterTaskIds(state.filters.issue) : null;
+  const baseTasks = state.tasks.filter(
+    (task) =>
+      taskMatchesQuery(task, query) &&
+      taskMatchesNonDateFilters(task, { ignoreIssue: quickIssueFilter }) &&
+      (!quickFilterIds || quickFilterIds.has(task.id)),
+  );
   if (!state.filters.date) return baseTasks;
   if (!shouldExpandDateFilterToProjects()) {
     return baseTasks.filter((task) => taskMatchesDateFilter(task, state.filters.date));
@@ -11729,14 +11800,14 @@ function taskMatchesFilters(task) {
   return true;
 }
 
-function taskMatchesNonDateFilters(task) {
+function taskMatchesNonDateFilters(task, options = {}) {
   if (state.filters.channel && normalizeChannelName(task.channel) !== normalizeChannelName(state.filters.channel)) return false;
   const detail = task.detail || task.category || "";
   if (state.filters.detail && detail !== state.filters.detail) return false;
   if (state.filters.status && (task.status || "") !== state.filters.status) return false;
   if (state.filters.assignee && !assigneeNames(task.assignee).includes(state.filters.assignee)) return false;
   if (state.filters.kind && !taskMatchesKindFilter(task, state.filters.kind)) return false;
-  if (state.filters.issue && !taskMatchesIssueFilter(task, state.filters.issue)) return false;
+  if (!options.ignoreIssue && state.filters.issue && !taskMatchesIssueFilter(task, state.filters.issue)) return false;
   return true;
 }
 
