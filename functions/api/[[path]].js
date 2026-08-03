@@ -7,7 +7,7 @@ const SYSTEM_CHANNEL = "__solpa_gantt_config__";
 const DEFAULT_ENV = {
   NOTION_VERSION: "2022-06-28",
   NOTION_READ_DATABASE_ID: "20175c38-e3be-4b38-b81e-e8394914431e",
-  NOTION_WRITE_DATABASE_ID: "b6e89562-3634-4ef2-bd75-c592a438e372",
+  NOTION_WRITE_DATABASE_ID: "a19280f9-8675-4df5-91b4-8eb5e60b8303",
   NOTION_TITLE_PROP: "이름",
   NOTION_DATE_PROP: "날짜",
   NOTION_START_PROP: "날짜",
@@ -17,14 +17,15 @@ const DEFAULT_ENV = {
   NOTION_CATEGORY_PROP: "카테고리",
   NOTION_STATUS_PROP: "상태",
   NOTION_ASSIGNEE_PROP: "사람",
-  NOTION_WRITE_TITLE_PROP: "프로젝트",
+  NOTION_WRITE_TITLE_PROP: "이름",
   NOTION_WRITE_CHANNEL_PROP: "채널",
-  NOTION_WRITE_PROJECT_PROP: "프로젝트",
+  NOTION_WRITE_PROJECT_PROP: "프로젝트명",
   NOTION_WRITE_DETAIL_PROP: "일정",
-  NOTION_WRITE_DATE_PROP: "날짜",
+  NOTION_WRITE_DATE_PROP: "시작일",
   NOTION_WRITE_STATUS_PROP: "상태",
   NOTION_WRITE_ASSIGNEE_PROP: "담당자",
   NOTION_WRITE_DESCRIPTION_PROP: "메모",
+  NOTION_WRITE_ORIGIN_ID_PROP: "원본 ID",
   APP_ALLOW_TARGET_ARCHIVE: "false",
   APP_EMBED_KEY: "140b034014a1a3d4141cfade6df012553e68",
 };
@@ -285,7 +286,7 @@ async function getTasksPayload(env, request, options = {}) {
       writeMode: targetSnapshot.available ? "target" : "disabled",
       status: targetSnapshot.available ? "connected" : "read-only",
       source: "채널팀 플랜",
-      target: targetSnapshot.available ? "간트_확인" : "",
+      target: targetSnapshot.available ? "02 제작 간트" : "",
       writeError: targetSnapshot.error,
     },
     diagnostics: diagnosticsFor(tasks, sourcePages.length, targetPages.length, store, {
@@ -373,19 +374,27 @@ async function createTaskInTarget(env, patch) {
     syncMode: "target",
     ...patch,
   });
-  const page = await createTargetPage(env, task, schema);
+  const existing = task.originId ? await findTargetTaskByOrigin(env, task.originId, schema) : null;
+  const page = existing
+    ? await updateTargetPage(env, existing.id, task, schema)
+    : await createTargetPage(env, task, schema);
   const saved = normalizeTask({
     ...task,
-    id: page.id,
+    id: existing?.id || page.id,
     source: "target",
-    syncMode: "target",
+    syncMode: task.originId ? "target-copy" : "target",
     updatedAt: page.last_edited_time || new Date().toISOString(),
   });
   await mutateStore(env, (store) => {
-    addActivity(store, { type: "create", title: "상세일정 생성", task: saved });
+    if (task.originId) store.writeMap[task.originId] = saved.id;
+    addActivity(store, {
+      type: existing ? "update" : "create",
+      title: existing ? "기존 일정 수정" : "상세일정 생성",
+      task: saved,
+    });
   });
   await invalidateTaskCache(env);
-  return { task: saved };
+  return { task: saved, created: !existing };
 }
 
 async function patchTask(env, id, patch) {
@@ -938,14 +947,15 @@ function summarizeNotionSchema(database, kind, env) {
   };
 
   if (kind === "write") {
-    const writeTitleProp = envValue(env, "NOTION_WRITE_TITLE_PROP") || "프로젝트";
-    const writeDateProp = envValue(env, "NOTION_WRITE_DATE_PROP") || "날짜";
+    const writeTitleProp = envValue(env, "NOTION_WRITE_TITLE_PROP") || "이름";
+    const writeDateProp = envValue(env, "NOTION_WRITE_DATE_PROP") || "시작일";
     const writeChannelProp = envValue(env, "NOTION_WRITE_CHANNEL_PROP") || "채널";
-    const writeProjectProp = envValue(env, "NOTION_WRITE_PROJECT_PROP") || "프로젝트";
+    const writeProjectProp = envValue(env, "NOTION_WRITE_PROJECT_PROP") || "프로젝트명";
     const writeDetailProp = envValue(env, "NOTION_WRITE_DETAIL_PROP") || "일정";
     const writeStatusProp = envValue(env, "NOTION_WRITE_STATUS_PROP") || "상태";
     const writeAssigneeProp = envValue(env, "NOTION_WRITE_ASSIGNEE_PROP") || "담당자";
     const writeDescriptionProp = envValue(env, "NOTION_WRITE_DESCRIPTION_PROP") || "메모";
+    const writeOriginIdProp = envValue(env, "NOTION_WRITE_ORIGIN_ID_PROP") || "원본 ID";
     return {
       databaseId: database.id,
       titleName: byName(writeTitleProp)?.name || byType("title")?.name,
@@ -964,6 +974,8 @@ function summarizeNotionSchema(database, kind, env) {
       assigneeType: byName(writeAssigneeProp)?.type || "rich_text",
       descriptionName: byName(writeDescriptionProp)?.name || byAliases(["메모", "내용"])?.name,
       descriptionType: byName(writeDescriptionProp)?.type || "rich_text",
+      originIdName: byName(writeOriginIdProp)?.name || byAliases(["원본 ID", "원본ID"])?.name,
+      originIdType: byName(writeOriginIdProp)?.type || "rich_text",
     };
   }
 
@@ -1025,11 +1037,12 @@ function pageToTask(page, schema, source) {
   const assignee = readPeopleNames(props[schema.assigneeName]) || readPropertyText(props[schema.assigneeName]) || "";
   const assigneeIds = readPeopleIds(props[schema.assigneeName]);
   const description = readPropertyText(props[schema.descriptionName]) || "";
+  const originId = readPropertyText(props[schema.originIdName]) || findOriginMarker(description);
   const start = readDateStart(props[schema.dateName]) || toDateOnly(page.created_time) || todayString();
   const end = readDateEnd(props[schema.dateName]) || start;
   const base = normalizeTask({
     id: page.id,
-    originId: findOriginMarker(description),
+    originId,
     source,
     syncMode: source === "source" ? "read-only" : "target",
     title,
@@ -1079,6 +1092,7 @@ function taskToNotionProperties(task, schema) {
   setTypedProperty(properties, schema.detailName, schema.detailType, task.detail || "");
   setTypedProperty(properties, schema.statusName, schema.statusType, task.status || "");
   setAssigneeProperty(properties, schema.assigneeName, schema.assigneeType, task.assignee, task.assigneeIds);
+  setTypedProperty(properties, schema.originIdName, schema.originIdType, task.originId || "");
   const description = stripOriginMarker(task.description || "");
   const originLine = task.originId ? `\n${ORIGIN_MARKER_PREFIX}:${task.originId}` : "";
   setTypedProperty(properties, schema.descriptionName, schema.descriptionType, `${description}${originLine}`.trim());

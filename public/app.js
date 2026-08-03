@@ -3536,7 +3536,7 @@ function renderConnection() {
         ? "로컬 고정 임베드"
         : "임시 임베드";
   const sourceName = state.connection.source || (String(state.connection.label || "").includes("채널팀 플랜") ? "채널팀 플랜" : "");
-  const targetName = state.connection.target || (state.connection.writeMode === "target" ? "간트_확인" : "");
+  const targetName = state.connection.target || (state.connection.writeMode === "target" ? "02 제작 간트" : "");
   const sourceLabel = sourceName && targetName
     ? `${sourceName} → ${targetName}`
     : state.connection.label || (sourceName ? `${sourceName} 읽기 전용` : "노션 연결");
@@ -5134,18 +5134,18 @@ function contextCreateModalCopy(context) {
   if (context?.kind === "channel") {
     return {
       title: "이 채널에 프로젝트 만들기",
-      summary: "선택한 채널을 기본값으로 새 프로젝트 일정을 만듭니다. 채널팀 플랜 원본은 건드리지 않고 간트_확인에 저장합니다.",
+      summary: "선택한 채널을 기본값으로 새 프로젝트 일정을 만듭니다. 채널팀 플랜 원본은 건드리지 않고 02 제작 간트에 저장합니다.",
     };
   }
   if (context?.kind === "project") {
     return {
       title: "이 프로젝트에 상세일정 만들기",
-      summary: "선택한 프로젝트를 기본값으로 새 상세일정을 만듭니다. 채널팀 플랜 원본은 건드리지 않고 간트_확인에 저장합니다.",
+      summary: "선택한 프로젝트를 기본값으로 새 상세일정을 만듭니다. 채널팀 플랜 원본은 건드리지 않고 02 제작 간트에 저장합니다.",
     };
   }
   return {
     title: "이 위치에 새 일정 만들기",
-    summary: "우클릭한 날짜와 행 정보를 기본값으로 새 일정을 만듭니다. 채널팀 플랜 원본은 건드리지 않고 간트_확인에 저장합니다.",
+    summary: "우클릭한 날짜와 행 정보를 기본값으로 새 일정을 만듭니다. 채널팀 플랜 원본은 건드리지 않고 02 제작 간트에 저장합니다.",
   };
 }
 
@@ -5193,7 +5193,7 @@ async function renameContextGroup() {
   hideContextMenu();
   const input = await openInputModal({
     title: `${fieldLabel} 수정`,
-    summary: `${contextSummary(context)} 기준으로 ${fieldLabel}을 바꿉니다. 채널팀 플랜 원본은 건드리지 않고 간트_확인에 저장합니다.`,
+    summary: `${contextSummary(context)} 기준으로 ${fieldLabel}을 바꿉니다. 채널팀 플랜 원본은 건드리지 않고 02 제작 간트에 저장합니다.`,
     badge: "이름 수정",
     confirmText: "이름 저장",
     fields: [
@@ -6194,7 +6194,7 @@ function openImpactPreview(label, cascaded) {
     els.impactModal.querySelector(".source-badge").textContent = "변경 확인";
     els.impactConfirmButton.textContent = "저장";
     els.impactTitle.textContent = label;
-    els.impactSummary.textContent = `연결된 후속 일정 ${cascaded.length}개도 같이 이동합니다. 채널팀 플랜 원본은 건드리지 않고 간트_확인에 저장합니다.`;
+    els.impactSummary.textContent = `연결된 후속 일정 ${cascaded.length}개도 같이 이동합니다. 채널팀 플랜 원본은 건드리지 않고 02 제작 간트에 저장합니다.`;
     els.impactGuard.innerHTML = impactGuardMarkup({ mode: "save" });
     els.impactList.innerHTML = impactPreviewMarkup(cascaded);
     els.impactModalBackdrop.hidden = false;
@@ -6483,10 +6483,10 @@ function impactGuardMode(confirmText, badge) {
 }
 
 function impactGuardMarkup({ mode = "save" } = {}) {
-  const saveLabel = mode === "local-rule" ? "저장: 화면 규칙" : "저장: 간트_확인";
+  const saveLabel = mode === "local-rule" ? "저장: 화면 규칙" : "저장: 02 제작 간트";
   const saveDetail = mode === "local-rule"
     ? "숨김/확인/복구 규칙만 저장"
-    : "수정·생성은 간트_확인 DB에 기록";
+    : "수정·생성은 02 제작 간트 DB에 기록";
   return `
     <div class="impact-guard-item">
       <strong>원본 보호</strong>
@@ -6563,11 +6563,11 @@ function writeTargetBreakdown(tasks) {
     return `현재 쓰기 대상은 ${state.connection?.label || "로컬"} 상태라 변경분은 로컬 변경사항으로 남습니다.`;
   }
   const parts = [
-    sourceTasks.length ? `원본 일정 ${sourceTasks.length}개는 간트_확인 사본으로 저장` : "",
-    targetTasks.length ? `기존 간트_확인 일정 ${targetTasks.length}개는 직접 수정` : "",
-    localTasks.length ? `로컬 일정 ${localTasks.length}개는 간트_확인에 생성/갱신` : "",
+    sourceTasks.length ? `원본 일정 ${sourceTasks.length}개는 02 제작 간트 사본으로 저장` : "",
+    targetTasks.length ? `기존 02 제작 간트 일정 ${targetTasks.length}개는 직접 수정` : "",
+    localTasks.length ? `로컬 일정 ${localTasks.length}개는 02 제작 간트에 생성/갱신` : "",
   ].filter(Boolean);
-  return parts.length ? `저장 영향: ${parts.join(", ")}됩니다.` : "저장 영향: 간트_확인에 변경분이 기록됩니다.";
+  return parts.length ? `저장 영향: ${parts.join(", ")}됩니다.` : "저장 영향: 02 제작 간트에 변경분이 기록됩니다.";
 }
 
 async function confirmDateChangePreview({ title, label, originalTasks, nextTasks, confirmText = "저장" }) {
@@ -6680,7 +6680,7 @@ async function confirmDependencyChangePreview({ title, summary, links, result, c
 
 async function confirmEditorChangePreview(original, next, changes) {
   const dateChanged = original.start !== next.start || original.end !== next.end;
-  const summary = `"${original.detail || original.title}"의 ${changes.length}개 항목이 바뀝니다.${dateChanged ? " 후속 이동이 켜져 있으면 저장 직전에 연결된 후속 일정 영향도 한 번 더 확인합니다." : ""} 채널팀 플랜 원본은 건드리지 않고 간트_확인에 저장합니다.`;
+  const summary = `"${original.detail || original.title}"의 ${changes.length}개 항목이 바뀝니다.${dateChanged ? " 후속 이동이 켜져 있으면 저장 직전에 연결된 후속 일정 영향도 한 번 더 확인합니다." : ""} 채널팀 플랜 원본은 건드리지 않고 02 제작 간트에 저장합니다.`;
 
   return openActionPreview({
     title: `"${original.detail || original.title}" 편집 저장 확인`,
@@ -6694,7 +6694,7 @@ async function confirmEditorChangePreview(original, next, changes) {
 async function confirmCreateTaskPreview(task) {
   return openActionPreview({
     title: "새 일정 생성 확인",
-    summary: `"${task.channel}" 채널의 "${task.project}" 프로젝트에 새 상세일정을 만듭니다. 채널팀 플랜 원본은 건드리지 않고 간트_확인에만 저장합니다.`,
+    summary: `"${task.channel}" 채널의 "${task.project}" 프로젝트에 새 상세일정을 만듭니다. 채널팀 플랜 원본은 건드리지 않고 02 제작 간트에만 저장합니다.`,
     items: [{
       title: taskDisplayName(task),
       meta: [task.status, task.assignee].filter(Boolean).join(" · ") || "새 상세일정",
@@ -6873,7 +6873,7 @@ function previewValue(value) {
 
 function deleteModeSummary() {
   if (state.diagnostics?.allowTargetArchive) {
-    return "간트_확인 항목은 보관 처리될 수 있지만, 채널팀 플랜 원본은 건드리지 않습니다.";
+    return "02 제작 간트 항목은 보관 처리될 수 있지만, 채널팀 플랜 원본은 건드리지 않습니다.";
   }
   return "현재 설정에서는 실제 삭제 대신 화면 숨김으로 처리하며, 채널팀 플랜 원본은 건드리지 않습니다.";
 }
@@ -7927,7 +7927,7 @@ async function endTimelineCreateDrag(event) {
 
   await createTaskFromSeed(timelineCreateSeed(drag.row, start, end), {
     title: "드래그한 기간에 새 일정 만들기",
-    summary: `${dateLabel(start)}-${dateLabel(end)} 기간으로 새 일정을 만듭니다. 채널팀 플랜 원본은 건드리지 않고 간트_확인에 저장합니다.`,
+    summary: `${dateLabel(start)}-${dateLabel(end)} 기간으로 새 일정을 만듭니다. 채널팀 플랜 원본은 건드리지 않고 02 제작 간트에 저장합니다.`,
   });
 }
 
@@ -8405,7 +8405,7 @@ async function linkSelectedTasks() {
 
   if (!(await confirmDependencyChangePreview({
     title: "선택 일정 연결 확인",
-    summary: `선택한 ${tasks.length}개 일정을 날짜순으로 ${links.length}개 선후관계로 연결합니다. 채널팀 플랜 원본은 건드리지 않고 간트_확인에 저장합니다.`,
+    summary: `선택한 ${tasks.length}개 일정을 날짜순으로 ${links.length}개 선후관계로 연결합니다. 채널팀 플랜 원본은 건드리지 않고 02 제작 간트에 저장합니다.`,
     links,
     result: "연결",
     confirmText: "연결 저장",
@@ -8422,7 +8422,7 @@ async function unlinkSelectedTasks() {
   if (!links.length) return;
   if (!(await confirmDependencyChangePreview({
     title: "선택 일정 연결 해제 확인",
-    summary: `선택한 ${tasks.length}개 일정 사이의 선후관계 ${links.length}개를 해제합니다. 채널팀 플랜 원본은 건드리지 않고 간트_확인에 저장합니다.`,
+    summary: `선택한 ${tasks.length}개 일정 사이의 선후관계 ${links.length}개를 해제합니다. 채널팀 플랜 원본은 건드리지 않고 02 제작 간트에 저장합니다.`,
     links,
     result: "해제",
     confirmText: "연결 해제",
@@ -8821,7 +8821,7 @@ function renderOperationPanel(options = {}) {
       state.embed?.hasEmbedKey ? "ok" : "warn",
     ),
     statusItemMarkup("원본 DB", diagnostics.sourceReadOnly ? "채널팀 플랜은 읽기 전용입니다." : "원본 쓰기 여부를 확인해야 합니다.", diagnostics.sourceReadOnly ? "ok" : "warn"),
-    statusItemMarkup("삭제 방식", diagnostics.allowTargetArchive ? "간트_확인 페이지를 보관 처리할 수 있습니다." : "삭제는 화면 숨김으로 처리됩니다.", diagnostics.allowTargetArchive ? "warn" : "ok"),
+    statusItemMarkup("삭제 방식", diagnostics.allowTargetArchive ? "02 제작 간트 페이지를 보관 처리할 수 있습니다." : "삭제는 화면 숨김으로 처리됩니다.", diagnostics.allowTargetArchive ? "warn" : "ok"),
     statusItemMarkup("동기화 기준", syncStatusDetail(), "ok"),
     statusItemMarkup("동기화 감지", `서버 변경은 최대 ${Math.round(SYNC_STATUS_INTERVAL_MS / 1000)}초 안에 확인합니다.`, "ok"),
     statusItemMarkup("전체 새로고침", `노션 원본 확인은 약 ${Math.round(FULL_SYNC_INTERVAL_MS / 1000)}초마다 수행합니다.`, "ok"),
@@ -8850,7 +8850,7 @@ function renderOperationPanel(options = {}) {
   els.operationMetrics.innerHTML = [
     metricMarkup("표시 일정", diagnostics.visibleTasks ?? state.tasks.length),
     metricMarkup("원본 읽기", diagnostics.sourceTasks ?? 0),
-    metricMarkup("간트_확인", diagnostics.targetTasks ?? 0),
+    metricMarkup("02 제작 간트", diagnostics.targetTasks ?? 0),
     metricMarkup("노션 캐시", notionCacheMetric(diagnostics.notionCache)),
     metricMarkup("EP 분리", diagnostics.multiProjectParts ?? 0),
     metricMarkup("자동 제외", diagnostics.autoExcludedTasks ?? 0),
@@ -9014,8 +9014,8 @@ function operationReadinessItems({ diagnostics, report, fixedEmbed, dependencyCo
       tone: sourceReady ? "ok" : "bad",
     },
     {
-      title: "간트_확인 저장",
-      detail: targetReady ? "수정/생성은 간트_확인 프로젝트 DB로 저장됩니다." : "쓰기 대상이 로컬 또는 오류 상태일 수 있습니다.",
+      title: "02 제작 간트 저장",
+      detail: targetReady ? "수정/생성은 02 제작 간트 DB로 저장됩니다." : "쓰기 대상이 로컬 또는 오류 상태일 수 있습니다.",
       tone: targetReady ? "ok" : "warn",
     },
     {
@@ -9050,7 +9050,7 @@ function operationReadinessItems({ diagnostics, report, fixedEmbed, dependencyCo
     },
     {
       title: "삭제 안전장치",
-      detail: diagnostics.allowTargetArchive ? "삭제가 간트_확인 보관으로 갈 수 있어 운영 전 확인이 필요합니다." : "삭제는 실제 보관 대신 화면 숨김으로 처리됩니다.",
+      detail: diagnostics.allowTargetArchive ? "삭제가 02 제작 간트 보관으로 갈 수 있어 운영 전 확인이 필요합니다." : "삭제는 실제 보관 대신 화면 숨김으로 처리됩니다.",
       tone: diagnostics.allowTargetArchive ? "warn" : "ok",
     },
     {
@@ -9127,7 +9127,7 @@ function operationSetupItems(fixedEmbed) {
     statusItemMarkup("2. 운영 세팅 실행", "setup-production.cmd -Hostname gantt.example.com을 실행하면 고정 터널, 자동 실행, 진단까지 한 번에 준비합니다.", "bad"),
     statusItemMarkup("3. 노션에 Embed", "출력되는 https://hostname/embed/... 주소를 노션에 한 번만 넣으면 됩니다.", "warn"),
     startupTaskStatusItemMarkup("4. 자동 실행"),
-    statusItemMarkup("5. 자가 진단", "doctor.cmd를 실행하면 서버, 팀플랜 읽기, 간트_확인 저장, 숨김 규칙, 고정 Embed 상태를 한 번에 확인합니다.", "warn"),
+    statusItemMarkup("5. 자가 진단", "doctor.cmd를 실행하면 서버, 팀플랜 읽기, 02 제작 간트 저장, 숨김 규칙, 고정 Embed 상태를 한 번에 확인합니다.", "warn"),
     statusItemMarkup("Embed 보호키", embedKeyState, state.embed?.hasEmbedKey ? "ok" : "bad"),
   ];
 }
@@ -9539,9 +9539,9 @@ function notionEmbedStatusText() {
     : "";
   if (info.installed) {
     const updated = info.updatedAt ? ` · ${formatTime(info.updatedAt)}` : "";
-    return `${info.message || "간트_확인 페이지에 등록되어 있습니다."}${updated}${suffix}`;
+    return `${info.message || "대상 노션 페이지에 등록되어 있습니다."}${updated}${suffix}`;
   }
-  if (info.canInstall) return `${info.message || "간트_확인 페이지에 자동 등록할 수 있습니다."}${suffix}`;
+  if (info.canInstall) return `${info.message || "대상 노션 페이지에 자동 등록할 수 있습니다."}${suffix}`;
   return info.message || "노션 자동 등록 조건을 확인해야 합니다.";
 }
 
@@ -9582,14 +9582,14 @@ async function startTemporaryTunnelFromPanel() {
 
   const confirmed = await openActionPreview({
     title: "임시 공개 주소 켜기",
-    summary: "테스트용 공개 주소를 만들고 간트_확인 페이지의 노션 임베드 블록을 자동 갱신합니다. 채널팀 플랜 원본은 건드리지 않습니다.",
+    summary: "테스트용 공개 주소를 만들고 대상 노션 페이지의 임베드 블록을 자동 갱신합니다. 채널팀 플랜 원본은 건드리지 않습니다.",
     badge: "임시 주소",
     confirmText: "켜기",
     items: [{
       title: "노션 임베드",
       meta: "trycloudflare 임시 주소",
       range: "터널 재시작 시 주소 변경",
-      result: "간트_확인 페이지 임베드 갱신",
+      result: "대상 노션 페이지 임베드 갱신",
       danger: false,
     }],
   });
@@ -9644,21 +9644,21 @@ async function stopTemporaryTunnelFromPanel() {
 
 async function installNotionEmbed() {
   if (!state.notionEmbed?.canInstall) {
-    showToast("노션에 등록할 수 있는 임베드 주소나 간트_확인 DB 설정이 없습니다.");
+    showToast("노션에 등록할 수 있는 임베드 주소나 쓰기 DB 설정이 없습니다.");
     return;
   }
 
   const embedUrl = operationEmbedUrl();
   const confirmed = await openActionPreview({
     title: state.notionEmbed?.installed ? "노션 임베드 갱신" : "노션 임베드 등록",
-    summary: `간트_확인 페이지에 현재 간트 임베드 주소를 ${state.notionEmbed?.installed ? "갱신" : "등록"}합니다. 채널팀 플랜 원본은 건드리지 않습니다.`,
+    summary: `대상 노션 페이지에 현재 간트 임베드 주소를 ${state.notionEmbed?.installed ? "갱신" : "등록"}합니다. 채널팀 플랜 원본은 건드리지 않습니다.`,
     badge: "노션 임베드",
     confirmText: state.notionEmbed?.installed ? "갱신" : "등록",
     items: [{
       title: "솔파 간트",
       meta: embedUrl,
       range: state.embed?.notionReady ? "고정 주소" : "로컬 주소",
-      result: "간트_확인 페이지",
+      result: "대상 노션 페이지",
       danger: false,
     }],
   });
@@ -9841,7 +9841,7 @@ function activityTypeLabel(type) {
 }
 
 function activityTargetLabel(target) {
-  if (target === "target" || target === "target-copy") return "간트_확인";
+  if (target === "target" || target === "target-copy") return "02 제작 간트";
   if (target === "local") return "로컬";
   if (target === "channel") return "채널";
   if (target === "project") return "프로젝트";
@@ -11162,7 +11162,7 @@ async function newTask() {
     color: selected?.color || colorForDetail(detail, PALETTE[0]),
   }, {
     title: "새 일정 만들기",
-    summary: "간트_확인 프로젝트 DB에 새 일정을 만듭니다. 채널팀 플랜 원본은 읽기만 합니다.",
+    summary: "02 제작 간트 DB에 새 일정을 만듭니다. 채널팀 플랜 원본은 읽기만 합니다.",
   });
 }
 
@@ -11211,14 +11211,14 @@ async function openCreateTaskModal(seed, copy = {}) {
   const end = compareDate(seed.end || start, start) < 0 ? start : seed.end || start;
   const input = await openInputModal({
     title: copy.title || "새 일정 만들기",
-    summary: copy.summary || "간트_확인에 새 일정을 만듭니다. 채널팀 플랜 원본은 건드리지 않습니다.",
+    summary: copy.summary || "02 제작 간트에 새 일정을 만듭니다. 채널팀 플랜 원본은 건드리지 않습니다.",
     badge: "생성",
     confirmText: "생성 확인",
     fields: [
       { name: "channel", label: "채널", value: seed.channel || "", placeholder: "채널명" },
       { name: "project", label: "프로젝트", value: seed.project || "", placeholder: "프로젝트명" },
       { name: "detail", label: "상세일정", value: seed.detail || "상세일정", placeholder: "촬영, 편집, 업로드 등" },
-      { name: "title", label: "노션 제목", value: seed.title || seed.project || "", placeholder: "간트_확인에 저장될 제목" },
+      { name: "title", label: "노션 제목", value: seed.title || seed.project || "", placeholder: "02 제작 간트에 저장될 제목" },
       { name: "description", label: "내용", value: seed.description || "", type: "textarea", required: false, placeholder: "메모" },
       { name: "start", label: "시작", value: start, type: "date" },
       { name: "end", label: "종료", value: end, type: "date" },
@@ -11295,7 +11295,7 @@ async function createProject(seed) {
     });
     render();
     refreshAfterLocalMutation("create-project");
-    showToast("간트_확인에 프로젝트만 만들었습니다.");
+    showToast("02 제작 간트에 프로젝트만 만들었습니다.");
   } catch (error) {
     showToast(error.message);
   }
@@ -11343,7 +11343,7 @@ async function createTask(seed) {
     });
     render();
     refreshAfterLocalMutation("create-task");
-    showToast("간트_확인에 상세일정을 만들었습니다.");
+    showToast("02 제작 간트에 상세일정을 만들었습니다.");
   } catch (error) {
     showToast(error.message);
   }
@@ -11703,14 +11703,14 @@ function scrollToToday(smooth = true) {
 }
 
 function savedLabel(mode) {
-  if (mode === "target") return "간트_확인에 저장했습니다.";
+  if (mode === "target") return "02 제작 간트에 저장했습니다.";
   if (mode === "notion") return "노션에 저장했습니다.";
   return "로컬에 저장했습니다.";
 }
 
 function sourceLabel(task) {
-  if (task.source === "source") return task.syncMode === "target-copy" ? "채널팀 · 간트_확인" : "채널팀 읽기";
-  if (task.source === "target") return task.originId ? "간트_확인 사본" : "간트_확인";
+  if (task.source === "source") return task.syncMode === "target-copy" ? "채널팀 · 02 제작 간트" : "채널팀 읽기";
+  if (task.source === "target") return task.originId ? "02 제작 간트 사본" : "02 제작 간트";
   if (task.source === "notion") return task.syncMode === "local" ? "노션 · 로컬" : "노션";
   if (task.source === "demo") return "데모";
   return "로컬";
