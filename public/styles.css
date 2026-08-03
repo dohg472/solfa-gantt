@@ -243,6 +243,16 @@ button.ops-summary-chip:hover {
   background: #f3f0e8;
 }
 
+button.ops-summary-chip.is-active {
+  border-color: rgba(23, 107, 101, 0.5);
+  background: #e8f2ef;
+  box-shadow: inset 0 0 0 1px rgba(23, 107, 101, 0.1);
+}
+
+.ops-summary-chip.reset > strong {
+  color: var(--danger);
+}
+
 .ops-summary-chip > span {
   color: var(--muted);
 }
@@ -1911,6 +1921,48 @@ body.is-dragging .gantt-bar.task .bar-handle::after {
   opacity: 1;
 }
 
+.source-content-section {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f7f6f2;
+}
+
+.source-content-section[hidden] {
+  display: none;
+}
+
+.source-content-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 760;
+}
+
+.source-content-head > :last-child {
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.source-content-body {
+  max-height: 280px;
+  padding: 10px 11px;
+  border: 1px solid #e6e2d9;
+  border-radius: 7px;
+  background: var(--surface-strong);
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow: auto;
+  overflow-wrap: anywhere;
+}
+
 .source-badge {
   display: inline-flex;
   align-items: center;
@@ -2442,6 +2494,16 @@ body.is-dragging .gantt-bar.task .bar-handle::after {
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
+}
+
+.hidden-panel-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.filter-reset-button {
+  color: #9b3d3d;
 }
 
 .hidden-summary {

@@ -5,6 +5,7 @@ const ROW_HEIGHTS = {
 const COLOR_LEGEND = [
   { label: "채널", color: "#176B65" },
   { label: "프로젝트", color: "#D8842F" },
+  { label: "기획", color: "#27AE60" },
   { label: "촬영", color: "#2F80ED" },
   { label: "편집", color: "#8B5CF6" },
   { label: "업로드", color: "#D84E4E" },
@@ -12,6 +13,7 @@ const COLOR_LEGEND = [
 const PAUSE_COLOR = "#8B949E";
 const PALETTE = ["#2F80ED", "#27AE60", "#D84E4E", "#8B5CF6", "#D8842F", "#00A7A7", "#D9468A"];
 const DETAIL_PRESETS = [
+  { label: "기획", value: "기획", color: "#27AE60" },
   { label: "촬영", value: "촬영", color: "#2F80ED" },
   { label: "편집", value: "편집", color: "#8B5CF6" },
   { label: "업로드", value: "업로드", color: "#D84E4E" },
@@ -37,7 +39,7 @@ const FULL_SYNC_INTERVAL_MS = 300000;
 const SYNC_RETRY_INTERVAL_MS = 30000;
 const DEFAULT_COLLAPSED_REVIEW_SECTIONS = ["upload-only", "missing-upload", "completed"];
 const STALE_REVIEW_BACKLOG_DAYS = 14;
-const COMPLETED_HIDE_GRACE_DAYS = 14;
+const COMPLETED_HIDE_GRACE_DAYS = 0;
 const PINNED_CHANNELS = [
   { name: "현대카드" },
   { name: "Hup!" },
@@ -184,6 +186,8 @@ const state = {
   viewSettingsUpdatedAt: "",
   viewSettingsSaveTimer: null,
   isApplyingViewSettings: false,
+  taskContentCache: new Map(),
+  taskContentRequests: new Map(),
 };
 
 const els = {
@@ -231,6 +235,7 @@ const els = {
   baselineToggleButton: document.getElementById("baselineToggleButton"),
   completedToggleButton: document.getElementById("completedToggleButton"),
   filterButton: document.getElementById("filterButton"),
+  quickResetFilterButton: document.getElementById("quickResetFilterButton"),
   moreTools: document.getElementById("moreTools"),
   moreToolsButton: document.getElementById("moreToolsButton"),
   moreToolsPanel: document.getElementById("moreToolsPanel"),
@@ -249,6 +254,9 @@ const els = {
   projectField: document.getElementById("projectField"),
   detailField: document.getElementById("detailField"),
   descriptionField: document.getElementById("descriptionField"),
+  sourceContentSection: document.getElementById("sourceContentSection"),
+  sourceContentStatus: document.getElementById("sourceContentStatus"),
+  sourceContentBody: document.getElementById("sourceContentBody"),
   startField: document.getElementById("startField"),
   endField: document.getElementById("endField"),
   statusField: document.getElementById("statusField"),
@@ -457,6 +465,7 @@ function bindEvents() {
   });
   els.panModeButton.addEventListener("click", togglePanMode);
   els.filterButton.addEventListener("click", openFilterPanel);
+  els.quickResetFilterButton?.addEventListener("click", resetFilters);
   els.moreToolsButton?.addEventListener("click", (event) => {
     event.stopPropagation();
     toggleMoreTools();
@@ -468,12 +477,12 @@ function bindEvents() {
   els.closeFilterPanelButton.addEventListener("click", closeFilterPanel);
   els.filterPanelBackdrop.addEventListener("click", closeFilterPanel);
   els.channelFilterSelect.addEventListener("change", () => updateFilter("channel", els.channelFilterSelect.value));
-  els.detailFilterSelect.addEventListener("change", () => updateFilter("detail", els.detailFilterSelect.value));
-  els.statusFilterSelect.addEventListener("change", () => updateFilter("status", els.statusFilterSelect.value));
-  els.assigneeFilterSelect.addEventListener("change", () => updateFilter("assignee", els.assigneeFilterSelect.value));
-  els.dateFilterSelect.addEventListener("change", () => updateFilter("date", els.dateFilterSelect.value));
-  els.kindFilterSelect.addEventListener("change", () => updateFilter("kind", els.kindFilterSelect.value));
-  els.issueFilterSelect.addEventListener("change", () => updateFilter("issue", els.issueFilterSelect.value));
+  els.detailFilterSelect?.addEventListener("change", () => updateFilter("detail", els.detailFilterSelect.value));
+  els.statusFilterSelect?.addEventListener("change", () => updateFilter("status", els.statusFilterSelect.value));
+  els.assigneeFilterSelect?.addEventListener("change", () => updateFilter("assignee", els.assigneeFilterSelect.value));
+  els.dateFilterSelect?.addEventListener("change", () => updateFilter("date", els.dateFilterSelect.value));
+  els.kindFilterSelect?.addEventListener("change", () => updateFilter("kind", els.kindFilterSelect.value));
+  els.issueFilterSelect?.addEventListener("change", () => updateFilter("issue", els.issueFilterSelect.value));
   els.resetFilterButton.addEventListener("click", resetFilters);
   els.filterPanel.addEventListener("click", handleFilterPanelClick);
   els.reviewButton.addEventListener("click", openReviewPanel);
@@ -865,7 +874,7 @@ function applyViewPrefs(prefs) {
   if (typeof prefs.showCritical === "boolean") state.showCritical = prefs.showCritical;
   if (typeof prefs.showBaseline === "boolean") state.showBaseline = prefs.showBaseline;
   if (typeof prefs.showCompleted === "boolean") state.showCompleted = prefs.showCompleted;
-  if (prefs.filters && typeof prefs.filters === "object") state.filters = { ...defaultFilters(), ...prefs.filters };
+  if (prefs.filters && typeof prefs.filters === "object") state.filters = normalizedViewFilters(prefs.filters);
   if (typeof prefs.search === "string") {
     const nextSearch = prefs.search.trim().slice(0, 160);
     if (nextSearch !== state.search) state.searchFocusIndex = -1;
@@ -1010,11 +1019,23 @@ function syncViewControls() {
   const activeFilterCount = Object.values(state.filters || {}).filter(Boolean).length;
   els.filterButton.textContent = activeFilterCount ? `필터 ${activeFilterCount}` : "필터";
   els.filterButton.classList.toggle("is-active", activeFilterCount > 0);
+  if (els.quickResetFilterButton) els.quickResetFilterButton.hidden = activeFilterCount === 0 && !state.search;
   const hiddenCount = Number(state.diagnostics?.hiddenTasks || 0)
     + Number(state.diagnostics?.hiddenProjects || 0)
     + Number(state.diagnostics?.hiddenChannels || 0);
   els.hiddenManagerButton.title = hiddenCount ? `${hiddenCount}개 숨김 기준 관리` : "숨김 기준 관리";
   renderSearchControls();
+}
+
+function normalizedViewFilters(filters = {}) {
+  return {
+    ...defaultFilters(),
+    channel: String(filters.channel || ""),
+    date: String(filters.date || ""),
+    kind: String(filters.kind || ""),
+    issue: String(filters.issue || ""),
+    risk: String(filters.risk || ""),
+  };
 }
 
 function toggleMoreTools() {
@@ -1241,6 +1262,7 @@ async function loadTasks(options = {}) {
   const normalizedOptions = options && !options.target ? options : {};
   const silent = Boolean(normalizedOptions.silent);
   const preserveScroll = Boolean(normalizedOptions.preserveScroll);
+  if (normalizedOptions.force) state.taskContentCache.clear();
   if (state.isLoading) {
     requestSyncRefresh(normalizedOptions.reason || "queued-load", 900, { force: normalizedOptions.force });
     return;
@@ -1863,16 +1885,14 @@ function buildRows(tasks) {
 
       if (state.collapsedRows.has(projectId) || isPauseProject(project) || !project.tasks.length) continue;
 
-      (project.displayTasks || project.tasks)
-        .slice()
-        .sort((a, b) => compareDate(a.start, b.start) || compareDate(a.end, b.end) || compareText(a.detail, b.detail))
+      episodeLabeledDisplayTasks(project.displayTasks || project.tasks)
         .forEach((task) => {
           const rowTasks = displayRowTasks(task);
           rows.push({
             id: task.id,
             kind: "task",
-            title: task.detail || task.title,
-            subtitle: task.displayCount > 1 ? `${task.displayCount}개 촬영 묶음` : "",
+            title: task.displayTitle || task.detail || task.title,
+            subtitle: "",
             start: task.start,
             end: task.end,
             color: isWonheePauseTask(task) ? PAUSE_COLOR : task.color,
@@ -2069,6 +2089,52 @@ function displayTasksForProject(tasks) {
   return result;
 }
 
+function episodeLabeledDisplayTasks(tasks) {
+  const sorted = (tasks || [])
+    .slice()
+    .sort((a, b) => compareDate(a.start, b.start) || compareDate(a.end, b.end) || compareText(a.detail, b.detail));
+  const groups = {
+    shoot: sorted.filter(isShootTask),
+    upload: sorted.filter(isUploadTask),
+  };
+  const unitCount = (task) => Math.max(1, Number(task.displayCount || 1));
+  const totals = {
+    shoot: groups.shoot.reduce((sum, task) => sum + unitCount(task), 0),
+    upload: groups.upload.reduce((sum, task) => sum + unitCount(task), 0),
+  };
+  const episodeTotal = Math.max(totals.shoot, totals.upload);
+  if (episodeTotal <= 1) return sorted;
+
+  const positions = { shoot: 0, upload: 0 };
+  return sorted.map((task) => {
+    const kind = isShootTask(task) ? "shoot" : isUploadTask(task) ? "upload" : "";
+    if (!kind) return task;
+    const count = unitCount(task);
+    const startEpisode = positions[kind] + 1;
+    let endEpisode = positions[kind] + count;
+    positions[kind] += count;
+    if (groups[kind].length === 1 && endEpisode < episodeTotal) endEpisode = episodeTotal;
+    return {
+      ...task,
+      displayTitle: `${scheduleTypeDisplayName(task)} ${episodeRangeLabel(startEpisode, endEpisode)}`,
+    };
+  });
+}
+
+function scheduleTypeDisplayName(task) {
+  const value = String(task?.detail || task?.title || "상세일정")
+    .replace(/\s*(?:EP\.?\s*\d+(?:\s*[~\-]\s*(?:EP\.?\s*)?\d+)?|\d+\s*(?:화|회)(?:\s*[~\-]\s*\d+\s*(?:화|회))?)\s*$/i, "")
+    .trim();
+  if (value) return value;
+  if (isShootTask(task)) return "촬영";
+  if (isUploadTask(task)) return "업로드";
+  return "상세일정";
+}
+
+function episodeRangeLabel(start, end) {
+  return start === end ? `EP.${start}` : `EP.${start}-${end}`;
+}
+
 function displayRowTasks(task) {
   return Array.isArray(task?.displayTasks) && task.displayTasks.length ? task.displayTasks : task ? [task] : [];
 }
@@ -2131,7 +2197,7 @@ function shouldHideProjectByDefault(tasks) {
 function shouldShowProjectInCurrentView(tasks, project = null, siblingProjects = []) {
   if (state.showCompleted) return true;
   if (state.filters.issue === "completed") return true;
-  if (["upload-only", "missing-upload", "issue"].includes(state.filters.issue)) return true;
+  if (["upload-only", "missing-shoot", "missing-upload", "issue"].includes(state.filters.issue)) return true;
   if (isProjectRevealed(tasks)) return true;
   if (shouldHideReviewBacklogByDefault(tasks, project, siblingProjects)) return false;
   return !shouldHideProjectByDefault(tasks);
@@ -2180,6 +2246,16 @@ function isStaleMissingUploadProject(tasks) {
 
 function isUploadOnlyProject(tasks) {
   return Boolean(tasks?.length && tasks.every(isUploadTask));
+}
+
+function isMissingShootProject(tasks) {
+  const list = tasks || [];
+  return Boolean(
+    list.length &&
+    list.some(isUploadTask) &&
+    !list.some(isShootTask) &&
+    !isSupplementalUploadProject(list)
+  );
 }
 
 function isSupplementalUploadProject(tasks) {
@@ -3178,7 +3254,7 @@ function projectVisibilityState(tasks) {
       kind: "completed",
       label: "업로드 완료",
       tone: "ok",
-      reason: `업로드가 ${dateLabel(latestUploadEnd)}에 끝난 뒤 2주가 지나 기본 숨김 대상입니다`,
+      reason: `업로드가 ${dateLabel(latestUploadEnd)}에 끝나 다음 날부터 기본 숨김 대상입니다`,
       hiddenByDefault: true,
       composition,
     };
@@ -3657,42 +3733,32 @@ function renderOpsSummary({ dependencyConflicts = [], workloadRisks = [] } = {})
     return;
   }
 
-  const taskRows = state.rows.filter((row) => row.kind === "task" && row.task);
-  const projectRows = state.rows.filter((row) => row.kind === "project" && !row.hiddenOnly);
-  const visibleTaskIds = new Set(projectRows.flatMap((row) => row.taskIds || []));
-  const totalTaskCount = Number(state.diagnostics?.visibleTasks || state.tasks.length || 0);
-  const uploadOnlyProjects = projectRows.filter((row) => row.issue === "upload-only").length;
-  const missingUploadProjects = projectRows.filter((row) => row.issue === "missing-upload").length;
-  const visibleReviewProjects = uploadOnlyProjects + missingUploadProjects;
-  const reviewReport = projectReviewReport();
-  const urgentReviewCount = reviewHighPriorityCount(reviewReport);
-  const reviewActionTotal = reviewActionCount(reviewReport);
-  const reviewActionChip = urgentReviewCount
-    ? { label: "긴급 검토", value: urgentReviewCount, tone: "bad", action: "urgent-review" }
-    : reviewActionTotal
-      ? { label: "검토 액션", value: reviewActionTotal, tone: "warn", action: "review-action" }
-      : null;
-  const fixedEmbed = Boolean(state.embed?.notionReady);
-  const localEmbed = Boolean(state.embed?.localEmbedUrl);
-  const embedSummary = fixedEmbed ? { value: "공개고정", tone: "ok" } : localEmbed ? { value: "로컬고정", tone: "warn" } : { value: "임시", tone: "bad" };
-  const filterSummary = currentViewConditionLabel();
+  const groups = projectReviewGroups();
+  const missingUploadProjects = groups.filter((group) => isMissingUploadProject(group.tasks)).length;
+  const missingShootProjects = groups.filter((group) => isMissingShootProject(group.tasks)).length;
+  const hasActiveView = activeFilterLabels().length > 0;
 
   const items = [
-    { label: "상세일정", value: `${visibleTaskIds.size}/${totalTaskCount || visibleTaskIds.size}`, tone: "ok", action: "filter" },
-    reviewActionChip,
-    filterSummary ? { label: "조건", value: filterSummary, tone: "warn", action: "filter" } : null,
-    filterSummary ? { label: "전체", value: "보기", tone: "ok", action: "clear-filters" } : null,
-    { label: "프로젝트", value: projectRows.length, tone: "ok" },
-    { label: "업로드 없음", value: missingUploadProjects, tone: missingUploadProjects ? "warn" : "ok", action: "missing-upload" },
-    { label: "업로드만", value: uploadOnlyProjects, tone: uploadOnlyProjects ? "warn" : "ok", action: "upload-only" },
-    { label: "화면 검토", value: visibleReviewProjects, tone: visibleReviewProjects ? "warn" : "ok", action: "issue" },
-    { label: "의존성", value: dependencyConflicts.length, tone: dependencyConflicts.length ? "bad" : "ok", action: "dependency" },
-    { label: "임베드", value: embedSummary.value, tone: embedSummary.tone, action: "operation" },
+    {
+      label: "업로드 없음",
+      value: missingUploadProjects,
+      tone: missingUploadProjects ? "warn" : "ok",
+      action: "missing-upload",
+      active: state.filters.issue === "missing-upload",
+    },
+    {
+      label: "촬영 없음",
+      value: missingShootProjects,
+      tone: missingShootProjects ? "warn" : "ok",
+      action: "missing-shoot",
+      active: state.filters.issue === "missing-shoot",
+    },
+    hasActiveView ? { label: "필터", value: "초기화", tone: "reset", action: "clear-filters" } : null,
   ].filter(Boolean);
 
   els.opsSummary.hidden = false;
   els.opsSummary.innerHTML = `
-    <strong>${escapeHtml(currentViewTitle())}</strong>
+    <strong>빠른 필터</strong>
     <div class="ops-summary-items">
       ${items.map(opsSummaryItemMarkup).join("")}
     </div>
@@ -3716,7 +3782,7 @@ function opsSummaryItemMarkup(item) {
   const tag = actionable ? "button" : "span";
   const attrs = actionable ? `type="button" data-ops-action="${escapeHtml(item.action)}"` : "";
   return `
-    <${tag} class="ops-summary-chip ${escapeHtml(item.tone || "ok")}" ${attrs}>
+    <${tag} class="ops-summary-chip ${escapeHtml(item.tone || "ok")}${item.active ? " is-active" : ""}" ${attrs}>
       <span>${escapeHtml(item.label)}</span>
       <strong>${escapeHtml(value)}</strong>
     </${tag}>
@@ -3727,7 +3793,7 @@ function handleOpsSummaryClick(event) {
   const button = event.target.closest("[data-ops-action]");
   if (!button) return;
   const action = button.dataset.opsAction || "";
-  if (["overdue", "upload-only", "missing-upload", "issue", "workload", "dependency", "completed"].includes(action)) {
+  if (["overdue", "upload-only", "missing-shoot", "missing-upload", "issue", "workload", "dependency", "completed"].includes(action)) {
     applyOpsSummaryFilter(action);
     return;
   }
@@ -3753,6 +3819,7 @@ function applyOpsSummaryFilter(action) {
   const filters = defaultFilters();
   if (action === "overdue") filters.date = "overdue";
   if (action === "upload-only") filters.issue = "upload-only";
+  if (action === "missing-shoot") filters.issue = "missing-shoot";
   if (action === "missing-upload") filters.issue = "missing-upload";
   if (action === "issue") filters.issue = "issue";
   if (action === "workload") {
@@ -3775,7 +3842,6 @@ function applyOpsSummaryFilter(action) {
   syncViewControls();
   saveViewPrefs();
   render();
-  scheduleOpsFilterFocus(action);
   showToast(`${opsSummaryFilterLabel(action)} 보기로 전환했습니다.`);
 }
 
@@ -3819,6 +3885,7 @@ function firstOpsFilterResultRow(action) {
 function opsSummaryFilterLabel(action) {
   if (action === "overdue") return "지연";
   if (action === "upload-only") return "업로드만";
+  if (action === "missing-shoot") return "촬영 없음";
   if (action === "missing-upload") return "업로드 없음";
   if (action === "issue") return "검토 필요";
   if (action === "workload") return "담당 중복";
@@ -4846,12 +4913,12 @@ function renderOptions() {
   const assignees = taskAssigneeOptions(state.tasks);
 
   populateFilterSelect(els.channelFilterSelect, "전체 채널", state.tasks.map((task) => task.channel).filter(Boolean), state.filters.channel);
-  populateFilterSelect(els.detailFilterSelect, "전체 상세일정", details, state.filters.detail);
-  populateFilterSelect(els.statusFilterSelect, "전체 상태", statuses, state.filters.status);
-  populateFilterSelect(els.assigneeFilterSelect, "전체 담당", assignees, state.filters.assignee);
-  els.dateFilterSelect.value = state.filters.date || "";
-  els.kindFilterSelect.value = state.filters.kind || "";
-  els.issueFilterSelect.value = state.filters.issue || "";
+  if (els.detailFilterSelect) populateFilterSelect(els.detailFilterSelect, "전체 상세일정", details, state.filters.detail);
+  if (els.statusFilterSelect) populateFilterSelect(els.statusFilterSelect, "전체 상태", statuses, state.filters.status);
+  if (els.assigneeFilterSelect) populateFilterSelect(els.assigneeFilterSelect, "전체 담당", assignees, state.filters.assignee);
+  if (els.dateFilterSelect) els.dateFilterSelect.value = state.filters.date || "";
+  if (els.kindFilterSelect) els.kindFilterSelect.value = state.filters.kind || "";
+  if (els.issueFilterSelect) els.issueFilterSelect.value = state.filters.issue || "";
 }
 
 function taskAssigneeOptions(tasks) {
@@ -4866,6 +4933,7 @@ function assigneeNames(value) {
 }
 
 function populateFilterSelect(select, allLabel, values, currentValue) {
+  if (!select) return;
   const uniqueValues = [...new Set(values.map((value) => String(value || "").trim()).filter(Boolean))].sort(compareText);
   if (currentValue && !uniqueValues.includes(currentValue)) uniqueValues.unshift(currentValue);
   select.innerHTML = [
@@ -4879,6 +4947,7 @@ function renderFilterState() {
   const active = activeFilterLabels();
   els.filterButton.textContent = active.length ? `필터 ${active.length}` : "필터";
   els.filterButton.classList.toggle("is-active", active.length > 0);
+  if (els.quickResetFilterButton) els.quickResetFilterButton.hidden = active.length === 0;
   els.filterSummary.textContent = active.length ? active.join(" · ") : "전체 보기";
   syncViewModeButtons();
   els.filterPanel.querySelectorAll("[data-filter-preset]").forEach((button) => {
@@ -4889,6 +4958,7 @@ function renderFilterState() {
 }
 
 function renderFilterMetrics() {
+  if (!els.filterMetrics) return;
   const filtered = filteredTasks();
   const scheduleCount = filtered.filter((task) => isScheduleTask(task) && !isAutoHiddenTask(task)).length;
   const channelCount = new Set(filtered.map((task) => normalizeChannelName(task.channel)).filter(Boolean)).size;
@@ -4942,6 +5012,7 @@ function issueFilterLabel(value) {
   const labels = {
     issue: "검토 필요",
     "upload-only": "업로드만 확인",
+    "missing-shoot": "촬영 없음",
     "missing-upload": "업로드 없음",
   };
   return labels[value] || "전체 검토";
@@ -8651,7 +8722,7 @@ function applyFilterPreset(preset) {
   if (preset === "shoot" || preset === "upload") {
     state.filters.kind = preset;
   }
-  if (preset === "issue" || preset === "upload-only" || preset === "missing-upload") {
+  if (preset === "issue" || preset === "upload-only" || preset === "missing-shoot" || preset === "missing-upload") {
     state.filters.issue = preset;
   }
   clearSelection(false);
@@ -11030,6 +11101,7 @@ function syncEditor() {
   els.editor.classList.toggle("is-group-editor", Boolean(isGroupOpen));
 
   if (!isOpen) {
+    resetTaskSourceContent();
     setTaskEditorFieldMode();
     els.editorTitle.textContent = "상세일정";
     els.sourceBadge.textContent = "선택 없음";
@@ -11049,6 +11121,7 @@ function syncEditor() {
   }
 
   if (isGroupOpen) {
+    resetTaskSourceContent();
     syncGroupEditor(groupRow);
     return;
   }
@@ -11068,6 +11141,87 @@ function syncEditor() {
   renderSwatches(task.color);
   renderDetailPresets(task.detail);
   els.deleteButton.disabled = false;
+  syncTaskSourceContent(task);
+}
+
+function resetTaskSourceContent() {
+  if (!els.sourceContentSection) return;
+  els.sourceContentSection.hidden = true;
+  els.sourceContentSection.dataset.pageId = "";
+  els.sourceContentSection.dataset.state = "";
+  if (els.sourceContentStatus) els.sourceContentStatus.textContent = "";
+  if (els.sourceContentBody) els.sourceContentBody.textContent = "";
+}
+
+function syncTaskSourceContent(task) {
+  if (!els.sourceContentSection || !els.sourceContentBody || !els.sourceContentStatus) return;
+  const pageId = taskContentPageId(task);
+  if (!pageId) {
+    resetTaskSourceContent();
+    return;
+  }
+
+  els.sourceContentSection.hidden = false;
+  if (els.sourceContentSection.dataset.pageId === pageId && els.sourceContentSection.dataset.state) return;
+  els.sourceContentSection.dataset.pageId = pageId;
+
+  const cached = state.taskContentCache.get(pageId);
+  if (cached) {
+    renderTaskSourceContent(pageId, cached);
+    return;
+  }
+
+  els.sourceContentSection.dataset.state = "loading";
+  els.sourceContentStatus.textContent = "불러오는 중";
+  els.sourceContentBody.textContent = "";
+  loadTaskSourceContent(pageId);
+}
+
+function taskContentPageId(task) {
+  return String(task?.originId || task?.id || "").split(":")[0].trim();
+}
+
+function loadTaskSourceContent(pageId) {
+  if (!state.taskContentRequests.has(pageId)) {
+    const request = fetch(apiUrl(`/api/tasks/${encodeURIComponent(pageId)}/content`), { cache: "no-store" })
+      .then(async (response) => {
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || "프로덕션 플랜 내용을 불러오지 못했습니다.");
+        const normalized = {
+          content: String(result.content || "").trim(),
+          blockCount: Number(result.blockCount || 0),
+          truncated: Boolean(result.truncated),
+        };
+        state.taskContentCache.set(pageId, normalized);
+        return normalized;
+      })
+      .catch((error) => {
+        const failed = { content: "", blockCount: 0, truncated: false, error: error.message || "내용을 불러오지 못했습니다." };
+        state.taskContentCache.set(pageId, failed);
+        return failed;
+      })
+      .finally(() => state.taskContentRequests.delete(pageId));
+    state.taskContentRequests.set(pageId, request);
+  }
+
+  state.taskContentRequests.get(pageId).then((result) => renderTaskSourceContent(pageId, result));
+}
+
+function renderTaskSourceContent(pageId, result) {
+  if (els.sourceContentSection?.dataset.pageId !== pageId) return;
+  els.sourceContentSection.dataset.state = result.error ? "error" : "ready";
+  if (result.error) {
+    els.sourceContentStatus.textContent = "불러오기 실패";
+    els.sourceContentBody.textContent = result.error;
+    return;
+  }
+  if (!result.content) {
+    els.sourceContentStatus.textContent = "내용 없음";
+    els.sourceContentBody.textContent = "등록된 페이지 본문이 없습니다.";
+    return;
+  }
+  els.sourceContentStatus.textContent = result.truncated ? "일부 표시" : `${result.blockCount}개 블록`;
+  els.sourceContentBody.textContent = result.content;
 }
 
 function editorGroupRow() {
@@ -11659,6 +11813,7 @@ function taskMatchesIssueFilter(task, filter) {
 
 function projectMatchesIssueFilter(tasks, filter) {
   if (filter === "upload-only") return isUploadOnlyProject(tasks) && !isSupplementalUploadProject(tasks);
+  if (filter === "missing-shoot") return isMissingShootProject(tasks);
   if (filter === "missing-upload") return isMissingUploadProject(tasks);
   if (filter === "issue") return (isUploadOnlyProject(tasks) && !isSupplementalUploadProject(tasks)) || isMissingUploadProject(tasks);
   if (filter === "completed") return shouldHideProjectByDefault(tasks);

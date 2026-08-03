@@ -4,8 +4,8 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>솔파 간트</title>
-    <link rel="stylesheet" href="/styles.css?v=20260731-hidden-restore2" />
-    <script src="/app.js?v=20260803-production-gantt-db" defer></script>
+    <link rel="stylesheet" href="/styles.css?v=20260803-focused-filters" />
+    <script src="/app.js?v=20260803-focused-filters" defer></script>
   </head>
   <body>
     <div class="app">
@@ -38,6 +38,7 @@
               <button class="segment-button" data-zoom="month" type="button">월</button>
             </div>
             <button id="filterButton" class="ghost-button compact-button" type="button">필터</button>
+            <button id="quickResetFilterButton" class="ghost-button compact-button filter-reset-button" type="button" hidden>필터 초기화</button>
             <button id="todayButton" class="ghost-button compact-button" type="button">오늘</button>
             <button id="hiddenManagerButton" class="ghost-button compact-button" type="button">숨김</button>
             <button id="undoButton" class="icon-button" title="실행 취소" aria-label="실행 취소" type="button" disabled>↶</button>
@@ -166,6 +167,13 @@
               <span>내용</span>
               <textarea id="descriptionField" name="description" rows="4"></textarea>
             </label>
+            <section id="sourceContentSection" class="source-content-section" hidden>
+              <div class="source-content-head">
+                <span>프로덕션 플랜 내용</span>
+                <span id="sourceContentStatus">불러오는 중</span>
+              </div>
+              <div id="sourceContentBody" class="source-content-body" aria-live="polite"></div>
+            </section>
             <div class="form-grid">
               <label>
                 <span>시작</span>
@@ -220,77 +228,21 @@
             <span class="source-badge">보기</span>
             <h2>필터</h2>
           </div>
-          <button id="closeFilterPanelButton" class="icon-button" title="닫기" aria-label="닫기" type="button">×</button>
+          <div class="hidden-panel-head-actions">
+            <button id="resetFilterButton" class="ghost-button compact-button filter-reset-button" type="button">필터 초기화</button>
+            <button id="closeFilterPanelButton" class="icon-button" title="닫기" aria-label="닫기" type="button">×</button>
+          </div>
         </div>
         <p id="filterSummary" class="hidden-summary">전체 보기</p>
         <section class="hidden-section">
-          <h3>조건</h3>
+          <h3>채널</h3>
           <div class="filter-select-grid">
             <label class="filter-field">
-              <span>채널</span>
+              <span>표시할 채널</span>
               <select id="channelFilterSelect"></select>
             </label>
-            <label class="filter-field">
-              <span>상세일정</span>
-              <select id="detailFilterSelect"></select>
-            </label>
-            <label class="filter-field">
-              <span>상태</span>
-              <select id="statusFilterSelect"></select>
-            </label>
-            <label class="filter-field">
-              <span>담당</span>
-              <select id="assigneeFilterSelect"></select>
-            </label>
-            <label class="filter-field">
-              <span>기간</span>
-              <select id="dateFilterSelect">
-                <option value="">전체 기간</option>
-                <option value="active">진행 중</option>
-                <option value="upcoming">오늘 이후</option>
-                <option value="next30">향후 30일</option>
-                <option value="overdue">지난 미완료</option>
-              </select>
-            </label>
-            <label class="filter-field">
-              <span>업무</span>
-              <select id="kindFilterSelect">
-                <option value="">전체 업무</option>
-                <option value="shoot">촬영</option>
-                <option value="edit">편집</option>
-                <option value="upload">업로드</option>
-              </select>
-            </label>
-            <label class="filter-field">
-              <span>검토</span>
-              <select id="issueFilterSelect">
-                <option value="">전체 검토</option>
-                <option value="issue">검토 필요</option>
-                <option value="upload-only">업로드만 확인</option>
-                <option value="missing-upload">업로드 없음</option>
-              </select>
-            </label>
           </div>
         </section>
-        <section class="hidden-section">
-          <h3>빠른 보기</h3>
-          <div class="filter-chip-row">
-            <button type="button" data-filter-preset="active">진행 중</button>
-            <button type="button" data-filter-preset="next30">향후 30일</button>
-            <button type="button" data-filter-preset="shoot">촬영</button>
-            <button type="button" data-filter-preset="upload">업로드</button>
-            <button type="button" data-filter-preset="issue">검토 필요</button>
-            <button type="button" data-filter-preset="upload-only">업로드만</button>
-            <button type="button" data-filter-preset="missing-upload">업로드 없음</button>
-          </div>
-        </section>
-        <section class="hidden-section">
-          <h3>현재 보기</h3>
-          <div id="filterMetrics" class="status-list"></div>
-        </section>
-        <div class="filter-actions">
-          <button id="resetFilterButton" class="ghost-button" type="button">필터 초기화</button>
-        </div>
       </aside>
       <div id="hiddenPanelBackdrop" class="panel-backdrop" hidden></div>
       <aside id="hiddenPanel" class="hidden-panel" aria-label="숨김 관리" hidden>

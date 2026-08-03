@@ -1,7 +1,10 @@
 const STORE_KEY = "solpa:gantt:store:v1";
 const TASK_CACHE_KEY = "solpa:gantt:tasks-cache:v1";
 const TASK_CACHE_MS = 5 * 60 * 1000;
-const COMPLETED_HIDE_GRACE_DAYS = 14;
+const COMPLETED_HIDE_GRACE_DAYS = 0;
+const PAGE_CONTENT_MAX_BLOCKS = 180;
+const PAGE_CONTENT_MAX_CHARS = 16000;
+const PAGE_CONTENT_MAX_DEPTH = 3;
 const ORIGIN_MARKER_PREFIX = "solpa-gantt-origin";
 const SYSTEM_CHANNEL = "__solpa_gantt_config__";
 const DEFAULT_ENV = {
@@ -32,6 +35,7 @@ const DEFAULT_ENV = {
 const COLOR_LEGEND = {
   channel: "#176B65",
   project: "#D8842F",
+  planning: "#27AE60",
   shoot: "#2F80ED",
   edit: "#8B5CF6",
   upload: "#D84E4E",
@@ -98,6 +102,11 @@ async function route({ request, env }) {
   if (path === "/tasks" && request.method === "POST") {
     const result = await createTaskInTarget(env, normalizeTaskPatch(await readJson(request)));
     return json(result, 201);
+  }
+
+  const taskContentMatch = path.match(/^\/tasks\/(.+)\/content$/);
+  if (taskContentMatch && request.method === "GET") {
+    return json(await getTaskPageContent(env, decodeURIComponent(taskContentMatch[1])));
   }
 
   const taskHideMatch = path.match(/^\/tasks\/(.+)\/hide$/);
@@ -1148,6 +1157,98 @@ async function getPageInDatabase(env, id, databaseId) {
   }
 }
 
+async function getTaskPageContent(env, id) {
+  const pageId = String(id || "").split(":")[0].trim();
+  if (!pageId) throw httpError(400, "내용을 불러올 일정 ID가 없습니다.");
+  const page = await notionRequest(env, `/v1/pages/${encodeURIComponent(pageId)}`, { method: "GET" });
+  const readDatabaseId = config(env).readDatabaseId;
+  const writeDatabaseId = config(env).writeDatabaseId;
+  const source = pageBelongsToDatabase(page, readDatabaseId)
+    ? "source"
+    : pageBelongsToDatabase(page, writeDatabaseId)
+      ? "target"
+      : "";
+  if (!source) throw httpError(404, "간트에 연결된 프로덕션 플랜 페이지가 아닙니다.");
+
+  const context = { lines: [], blockCount: 0, charCount: 0, truncated: false };
+  await collectNotionBlockContent(env, pageId, 0, context);
+  return {
+    pageId: page.id || pageId,
+    source,
+    content: context.lines.join("\n").trim(),
+    blockCount: context.blockCount,
+    truncated: context.truncated,
+  };
+}
+
+async function collectNotionBlockContent(env, blockId, depth, context) {
+  if (context.truncated || depth > PAGE_CONTENT_MAX_DEPTH) return;
+  let cursor = "";
+  do {
+    const query = new URLSearchParams({ page_size: "100" });
+    if (cursor) query.set("start_cursor", cursor);
+    const result = await notionRequest(
+      env,
+      `/v1/blocks/${encodeURIComponent(blockId)}/children?${query.toString()}`,
+      { method: "GET" },
+    );
+    for (const block of result.results || []) {
+      if (context.blockCount >= PAGE_CONTENT_MAX_BLOCKS || context.charCount >= PAGE_CONTENT_MAX_CHARS) {
+        context.truncated = true;
+        return;
+      }
+      context.blockCount += 1;
+      const line = notionBlockText(block);
+      if (line) appendNotionContentLine(context, `${"  ".repeat(depth)}${line}`);
+      if (block.has_children && depth < PAGE_CONTENT_MAX_DEPTH && !context.truncated) {
+        await collectNotionBlockContent(env, block.id, depth + 1, context);
+      }
+    }
+    cursor = result.has_more ? result.next_cursor || "" : "";
+  } while (cursor && !context.truncated);
+}
+
+function appendNotionContentLine(context, value) {
+  const line = String(value || "").trimEnd();
+  if (!line) return;
+  const remaining = PAGE_CONTENT_MAX_CHARS - context.charCount;
+  if (remaining <= 0) {
+    context.truncated = true;
+    return;
+  }
+  const next = line.slice(0, remaining);
+  context.lines.push(next);
+  context.charCount += next.length + 1;
+  if (next.length < line.length) context.truncated = true;
+}
+
+function notionBlockText(block) {
+  const type = block?.type || "";
+  const value = block?.[type] || {};
+  const content = plainText(value.rich_text);
+  if (type === "bulleted_list_item") return content ? `• ${content}` : "";
+  if (type === "numbered_list_item") return content ? `• ${content}` : "";
+  if (type === "to_do") return content ? `${value.checked ? "[x]" : "[ ]"} ${content}` : "";
+  if (type === "quote") return content ? `> ${content}` : "";
+  if (type === "callout") return content ? `• ${content}` : "";
+  if (type === "code") return content ? `[${value.language || "code"}] ${content}` : "";
+  if (type === "equation") return value.expression || "";
+  if (type === "child_page") return value.title ? `하위 페이지: ${value.title}` : "";
+  if (type === "child_database") return value.title ? `하위 데이터베이스: ${value.title}` : "";
+  if (type === "bookmark" || type === "embed" || type === "link_preview") {
+    return [content, value.url].filter(Boolean).join(" ");
+  }
+  if (type === "table_row") {
+    return (value.cells || []).map((cell) => plainText(cell)).filter(Boolean).join(" | ");
+  }
+  if (["image", "video", "audio", "file", "pdf"].includes(type)) {
+    const caption = plainText(value.caption);
+    const labels = { image: "이미지", video: "영상", audio: "오디오", file: "파일", pdf: "PDF" };
+    return `[${labels[type]}]${caption ? ` ${caption}` : ""}`;
+  }
+  return content;
+}
+
 function pageBelongsToDatabase(page, databaseId) {
   const parentId = page?.parent?.type === "database_id" ? page.parent.database_id : "";
   return Boolean(parentId && normalizeLookupId(parentId) === normalizeLookupId(databaseId));
@@ -1811,6 +1912,7 @@ function inferDetail(title) {
   if (/업로드|릴리즈|게시|발행/i.test(title)) return "업로드";
   if (/편집|가편/i.test(title)) return "편집";
   if (/촬영|재촬영/i.test(title)) return "촬영";
+  if (/기획|구성안|프리\s*프로덕션|pre[- ]?production|planning/i.test(title)) return "기획";
   return "";
 }
 
@@ -1819,6 +1921,7 @@ function colorForGantt(label) {
   if (/업로드|릴리즈|게시|발행/i.test(label)) return COLOR_LEGEND.upload;
   if (/편집|가편/i.test(label)) return COLOR_LEGEND.edit;
   if (/촬영|재촬영/i.test(label)) return COLOR_LEGEND.shoot;
+  if (/기획|구성안|프리\s*프로덕션|pre[- ]?production|planning/i.test(label)) return COLOR_LEGEND.planning;
   return COLOR_LEGEND.default;
 }
 
