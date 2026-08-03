@@ -3347,9 +3347,6 @@ function healthForTasks(tasks) {
   const list = tasks || [];
   if (!list.length) return { label: "", tone: "muted" };
   const status = projectVisibilityState(list);
-  if (["missing-upload", "upload-only"].includes(status.kind)) {
-    return { label: status.label, tone: status.tone };
-  }
   return { label: "", tone: status.tone };
 }
 
