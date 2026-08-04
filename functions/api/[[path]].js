@@ -33,14 +33,14 @@ const DEFAULT_ENV = {
   APP_EMBED_KEY: "140b034014a1a3d4141cfade6df012553e68",
 };
 const COLOR_LEGEND = {
-  channel: "#176B65",
-  project: "#D8842F",
-  planning: "#27AE60",
-  shoot: "#2F80ED",
-  edit: "#8B5CF6",
-  upload: "#D84E4E",
-  pause: "#8B949E",
-  default: "#2F80ED",
+  channel: "#787774",
+  project: "#D9730D",
+  planning: "#448361",
+  shoot: "#337EA9",
+  edit: "#9065B0",
+  upload: "#D44C47",
+  pause: "#787774",
+  default: "#337EA9",
 };
 const DEFAULT_PROJECT_ALIAS_RULES = [
   {

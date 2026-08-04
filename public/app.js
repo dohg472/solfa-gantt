@@ -1,22 +1,22 @@
 const ROW_HEIGHTS = {
-  comfortable: 56,
-  compact: 44,
+  comfortable: 48,
+  compact: 38,
 };
 const COLOR_LEGEND = [
-  { label: "채널", color: "#176B65" },
-  { label: "프로젝트", color: "#D8842F" },
-  { label: "기획", color: "#27AE60" },
-  { label: "촬영", color: "#2F80ED" },
-  { label: "편집", color: "#8B5CF6" },
-  { label: "업로드", color: "#D84E4E" },
+  { label: "채널", color: "#787774" },
+  { label: "프로젝트", color: "#D9730D" },
+  { label: "기획", color: "#448361" },
+  { label: "촬영", color: "#337EA9" },
+  { label: "편집", color: "#9065B0" },
+  { label: "업로드", color: "#D44C47" },
 ];
-const PAUSE_COLOR = "#8B949E";
-const PALETTE = ["#2F80ED", "#27AE60", "#D84E4E", "#8B5CF6", "#D8842F", "#00A7A7", "#D9468A"];
+const PAUSE_COLOR = "#787774";
+const PALETTE = ["#337EA9", "#448361", "#D44C47", "#9065B0", "#D9730D", "#0F7B6C", "#C14C8A"];
 const DETAIL_PRESETS = [
-  { label: "기획", value: "기획", color: "#27AE60" },
-  { label: "촬영", value: "촬영", color: "#2F80ED" },
-  { label: "편집", value: "편집", color: "#8B5CF6" },
-  { label: "업로드", value: "업로드", color: "#D84E4E" },
+  { label: "기획", value: "기획", color: "#448361" },
+  { label: "촬영", value: "촬영", color: "#337EA9" },
+  { label: "편집", value: "편집", color: "#9065B0" },
+  { label: "업로드", value: "업로드", color: "#D44C47" },
 ];
 const ZOOM = {
   day: { dayWidth: 38, tickEvery: 1 },
@@ -1438,7 +1438,7 @@ function renderTimelineNavigator(timelineWidth) {
     const maxWidth = Math.max(0.8, 100 - left);
     const width = clamp((daysBetween(row.start, row.end) + 1) / totalDays * 100, 0.8, maxWidth);
     const lane = index % 4;
-    return `<span class="timeline-navigator-bar ${escapeHtml(row.issue ? `is-issue-${row.issue}` : "")}" style="--left:${left}%;--width:${width}%;--lane:${lane};--task-color:${row.color || "#d8842f"}"></span>`;
+    return `<span class="timeline-navigator-bar ${escapeHtml(row.issue ? `is-issue-${row.issue}` : "")}" style="--left:${left}%;--width:${width}%;--lane:${lane};--task-color:${row.color || "#d9730d"}"></span>`;
   });
 
   const todayOffset = daysBetween(state.rangeStart, todayString());
@@ -1668,9 +1668,9 @@ function resetTableWidth(event) {
 }
 
 function barTop(index, kind, rowHeight) {
-  if (kind === "channel") return index * rowHeight + Math.max(4, Math.round((rowHeight - 8) / 2));
-  if (kind === "project") return index * rowHeight + Math.max(7, Math.round((rowHeight - 24) / 2));
-  return index * rowHeight + Math.max(3, Math.round((rowHeight - 32) / 2));
+  if (kind === "channel") return index * rowHeight + Math.max(4, Math.round((rowHeight - 4) / 2));
+  if (kind === "project") return index * rowHeight + Math.max(7, Math.round((rowHeight - 18) / 2));
+  return index * rowHeight + Math.max(3, Math.round((rowHeight - 24) / 2));
 }
 
 function buildRows(tasks) {
@@ -1847,7 +1847,7 @@ function buildRows(tasks) {
       subtitle: `${channel.projects.length}개 프로젝트`,
       start: channel.range.start,
       end: channel.range.end,
-      color: "#176B65",
+      color: "#787774",
       progress: channelProgress,
       health: channelHealth,
       collapsed: state.collapsedRows.has(channelId),
@@ -2053,7 +2053,7 @@ function projectScheduleImbalanceLabel(tasks) {
 }
 
 function projectColor(project) {
-  return hasPauseProjectSignal(project) ? PAUSE_COLOR : "#D8842F";
+  return hasPauseProjectSignal(project) ? PAUSE_COLOR : "#D9730D";
 }
 
 function isPauseProject(project) {
@@ -4614,7 +4614,10 @@ function renderBars(rows, dayWidth, criticalTaskIds) {
     if (clippedEnd) bar.classList.add("is-clipped-end");
     if (!editableGroup) bar.classList.add("is-readonly");
     if (editableGroup && row.kind !== "task" && width < 56) bar.classList.add("is-short-group-bar");
-    bar.style.setProperty("--task-color", row.isPause ? PAUSE_COLOR : row.color);
+    const barColor = row.isPause
+      ? PAUSE_COLOR
+      : (row.kind === "project" && row.issue === "completed" ? "#448361" : row.color);
+    bar.style.setProperty("--task-color", barColor);
     bar.style.setProperty("--progress", `${row.progress || 0}%`);
     bar.style.left = `${left}px`;
     bar.style.top = `${barTop(index, row.kind, rowHeight)}px`;
@@ -4626,11 +4629,12 @@ function renderBars(rows, dayWidth, criticalTaskIds) {
       bar.dataset.taskId = row.task.id;
       const episodeLabel = taskBarEpisodeLabel(row);
       const taskLabel = episodeLabel || taskBarLabel(row);
-      bar.classList.toggle("has-episode-label", Boolean(episodeLabel));
+      const episodeInside = Boolean(episodeLabel) && width >= episodeLabel.length * 7 + 18;
+      bar.classList.toggle("has-episode-label", Boolean(episodeLabel) && !episodeInside);
       bar.classList.toggle("is-label-hidden", !taskLabel);
       bar.innerHTML = `
         <span class="bar-progress"></span>
-        ${episodeLabel
+        ${episodeLabel && !episodeInside
           ? `<span class="bar-label-outside bar-episode-label">${escapeHtml(episodeLabel)}</span>`
           : `<span class="bar-label">${escapeHtml(taskLabel)}</span>`}
         <span class="dependency-dot left" data-dependency-side="left" title="선행 연결"></span>
@@ -4704,6 +4708,9 @@ function renderBars(rows, dayWidth, criticalTaskIds) {
           });
         });
       }
+      if (row.kind === "project" && row.collapsed && !row.isPause) {
+        appendEpisodeMarkers(bar, row, taskById, dayWidth, left, width);
+      }
     }
 
     fragment.appendChild(bar);
@@ -4746,9 +4753,34 @@ function baselineForTask(task, baselineMap) {
 
 function baselineBarTop(index, kind, rowHeight) {
   const top = barTop(index, kind, rowHeight);
-  if (kind === "channel") return top + 11;
-  if (kind === "project") return top + 27;
-  return top + 36;
+  if (kind === "channel") return top + 7;
+  if (kind === "project") return top + 21;
+  return top + 27;
+}
+
+function appendEpisodeMarkers(bar, row, taskById, dayWidth, barLeft, barWidth) {
+  const seen = new Set();
+  const markers = [];
+  for (const id of row.taskIds || []) {
+    const task = taskById.get(id) || taskById.get(normalizeId(id));
+    if (!task || !isUploadTask(task)) continue;
+    const label = extractEpisodeLabel([task.title, task.detail].filter(Boolean).join(" "));
+    if (!label || seen.has(label)) continue;
+    seen.add(label);
+    const x = (daysBetween(state.rangeStart, task.start) + 0.5) * dayWidth - barLeft;
+    if (x < 14 || x > barWidth - 14) continue;
+    markers.push({ label, x });
+  }
+  markers
+    .sort((a, b) => a.x - b.x)
+    .slice(0, 8)
+    .forEach((marker) => {
+      const element = document.createElement("span");
+      element.className = "bar-ep-marker";
+      element.textContent = marker.label;
+      element.style.left = `${Math.round(marker.x)}px`;
+      bar.appendChild(element);
+    });
 }
 
 function baselineTitle(row, baseline) {
@@ -4813,9 +4845,13 @@ function taskBarLabel(row) {
 }
 
 function taskBarEpisodeLabel(row) {
-  if (!row?.task || !isUploadTask(row.task)) return "";
-  const match = String(row.title || "").match(/EP\.?\s*\d+(?:\s*-\s*\d+)?/i);
-  return match ? match[0].replace(/\s+/g, "").replace(/^EP(?=\d)/i, "EP.") : "";
+  if (!row?.task) return "";
+  return extractEpisodeLabel(row.title);
+}
+
+function extractEpisodeLabel(value) {
+  const match = String(value || "").match(/EP\.?\s*\d+(?:\s*-\s*\d+)?/i);
+  return match ? match[0].replace(/\s+/g, "").replace(/^EP(?=\d)/i, "EP.").toUpperCase() : "";
 }
 
 function shouldUseOutsideProjectLabel(row, width, clippedEnd) {
@@ -11417,7 +11453,7 @@ async function openCreateProjectModal(seed) {
     end: normalizedEnd,
     status: "입력",
     assignee: "",
-    color: "#D8842F",
+    color: "#D9730D",
   };
 }
 
@@ -11477,7 +11513,7 @@ async function createProject(seed) {
     end: compareDate(seed.end || seed.start || todayString(), seed.start || todayString()) < 0 ? seed.start || todayString() : seed.end || seed.start || todayString(),
     status: "입력",
     assignee: "",
-    color: seed.color || "#D8842F",
+    color: seed.color || "#D9730D",
   };
   if (!(await confirmCreateProjectPreview(base))) return;
 
