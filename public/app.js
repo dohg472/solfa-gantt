@@ -190,6 +190,8 @@ const state = {
   taskContentRequests: new Map(),
 };
 
+let lastReviewAlertSyncAt = 0;
+
 const els = {
   connectionLine: document.getElementById("connectionLine"),
   statusBanner: document.getElementById("statusBanner"),
@@ -1395,6 +1397,7 @@ function render() {
 
   renderConnection();
   renderStatusBanner();
+  queueReviewAlertSync();
   renderOpsSummary({ dependencyConflicts, workloadRisks });
   renderHeaders(range.start, range.end, dayWidth, bodyHeight);
   renderRows(state.rows, criticalTaskIds);
@@ -3731,16 +3734,6 @@ function currentStatusBanner() {
       detail: `숨긴 프로젝트 중 ${hiddenProjectLeaks}개에서 다시 표시된 일정이 감지됐습니다. 직접 숨긴 항목은 유지한 채 기준만 정리할 수 있습니다.`,
       button: "숨김 열기",
       panel: "hidden",
-    };
-  }
-
-  if (urgentReviewCount > 0) {
-    return {
-      tone: "warn",
-      title: "검토 후보 확인 필요",
-      detail: `촬영/업로드가 갈라졌거나 업로드 누락 가능성이 높은 후보 ${urgentReviewCount}개가 있습니다.`,
-      button: "검토 열기",
-      panel: "review",
     };
   }
 
@@ -10057,6 +10050,30 @@ function reviewHighPriorityCount(report) {
   return [...(report.similar || []), ...(report.uploadOnly || []), ...(report.missingUpload || [])]
     .filter((group) => group.reviewTone === "high")
     .length;
+}
+
+function queueReviewAlertSync() {
+  if (Date.now() - lastReviewAlertSyncAt < 5 * 60 * 1000) return;
+  lastReviewAlertSyncAt = Date.now();
+  let candidates = [];
+  try {
+    const report = projectReviewReport();
+    candidates = [...(report.similar || []), ...(report.uploadOnly || []), ...(report.missingUpload || [])]
+      .filter((group) => group.reviewTone === "high")
+      .map((group) => ({
+        key: `${group.reviewKind || "review"}:${group.key || group.project || ""}`,
+        project: group.project || group.name || "",
+        channel: group.channel || "",
+        reason: group.reviewReason || "",
+      }));
+  } catch {
+    return;
+  }
+  fetch(apiUrl("/api/review-alerts"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ candidates }),
+  }).catch(() => {});
 }
 
 function reviewActionCount(report) {

@@ -148,6 +148,10 @@ async function route({ request, env }) {
     return json(await deleteReviewIgnore(env, await readJson(request)));
   }
 
+  if (path === "/review-alerts" && request.method === "POST") {
+    return json(await handleReviewAlerts(env, await readJson(request)));
+  }
+
   if (path === "/change-requests" && request.method === "GET") {
     return json(await listChangeRequests(env, url));
   }
@@ -624,6 +628,69 @@ async function deleteProjectAlias(env, body) {
   });
   await invalidateTaskCache(env);
   return { deleted: true };
+}
+
+const REVIEW_ALERT_KEY = "solpa:gantt:review-alerts:v1";
+
+async function handleReviewAlerts(env, body) {
+  const webhook = envValue(env, "SLACK_WEBHOOK_URL");
+  if (!webhook || !env.SOLPA_GANTT_KV) return { ok: true, disabled: true };
+
+  const incoming = Array.isArray(body?.candidates) ? body.candidates.slice(0, 100) : [];
+  const candidates = incoming
+    .map((item) => ({
+      key: String(item?.key || "").slice(0, 200),
+      project: String(item?.project || "").slice(0, 200),
+      channel: String(item?.channel || "").slice(0, 100),
+      reason: String(item?.reason || "").slice(0, 300),
+    }))
+    .filter((item) => item.key);
+
+  let stored = {};
+  try {
+    stored = JSON.parse(await env.SOLPA_GANTT_KV.get(REVIEW_ALERT_KEY) || "{}");
+  } catch {
+    stored = {};
+  }
+  const notified = stored.notified && typeof stored.notified === "object" ? stored.notified : {};
+  const lastPostAt = Number(stored.lastPostAt || 0);
+
+  const incomingKeys = new Set(candidates.map((item) => item.key));
+  let changed = false;
+  for (const key of Object.keys(notified)) {
+    if (!incomingKeys.has(key)) {
+      delete notified[key];
+      changed = true;
+    }
+  }
+
+  const fresh = candidates.filter((item) => !notified[item.key]);
+  let posted = 0;
+  if (fresh.length && Date.now() - lastPostAt > 10 * 60 * 1000) {
+    const lines = fresh.map((item) => `• [${item.channel || "미지정"}] ${item.project} — ${item.reason}`).join("\n");
+    const link = `https://solpa-gantt.pages.dev/embed/${envValue(env, "APP_EMBED_KEY")}`;
+    const message = `🔔 간트 검토 후보 ${fresh.length}건\n${lines}\n확인하기: ${link}`;
+    const response = await fetch(webhook, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: message }),
+    });
+    if (response.ok) {
+      const now = Date.now();
+      fresh.forEach((item) => {
+        notified[item.key] = { at: now, project: item.project, reason: item.reason };
+      });
+      stored.lastPostAt = now;
+      posted = fresh.length;
+      changed = true;
+    }
+  }
+
+  if (changed) {
+    stored.notified = notified;
+    await env.SOLPA_GANTT_KV.put(REVIEW_ALERT_KEY, JSON.stringify(stored));
+  }
+  return { ok: true, notified: posted };
 }
 
 async function saveReviewIgnore(env, body) {
