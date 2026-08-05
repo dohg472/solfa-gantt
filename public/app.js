@@ -11572,6 +11572,12 @@ function editorGroupRow() {
   return state.rows.find((row) => row.id === state.editorRowId && ["channel", "project"].includes(row.kind));
 }
 
+function projectMetaTaskForRow(row) {
+  if (row?.kind !== "project") return null;
+  const ids = new Set(row.taskIds || []);
+  return state.tasks.find((task) => ids.has(task.id) && isProjectMetaTask(task)) || null;
+}
+
 function syncGroupEditor(row) {
   if (els.planContent) els.planContent.hidden = true;
   els.descriptionField?.classList.toggle("has-plan-content", false);
@@ -11583,7 +11589,7 @@ function syncGroupEditor(row) {
   els.projectField.value = row.kind === "project" ? row.title : "";
   els.detailField.value = "";
   els.titleField.value = row.title;
-  els.descriptionField.value = state.groupNotes?.[row.id] || "";
+  els.descriptionField.value = projectMetaTaskForRow(row)?.description || state.groupNotes?.[row.id] || "";
   els.startField.value = row.start || todayString();
   els.endField.value = row.end || row.start || todayString();
   els.statusField.value = "";
@@ -11880,13 +11886,31 @@ async function saveGroupEditor() {
     }
   }
 
+  const metaTask = projectMetaTaskForRow(row);
+  if (metaTask) {
+    const metaChanged =
+      nextNote !== String(metaTask.description || "") ||
+      normalizedStart !== metaTask.start ||
+      normalizedEnd !== metaTask.end;
+    if (metaChanged) {
+      try {
+        await patchTask(metaTask.id, { ...metaTask, description: nextNote, start: normalizedStart, end: normalizedEnd });
+        metaTask.description = nextNote;
+        metaTask.start = normalizedStart;
+        metaTask.end = normalizedEnd;
+      } catch (error) {
+        showToast(`내용 저장 실패: ${error.message}`);
+      }
+    }
+  }
+
   if (finalRowId !== oldRowId) {
     delete state.groupRanges[oldRowId];
     delete state.groupNotes[oldRowId];
   }
   setGroupRangeOverride(finalRowId, { start: normalizedStart, end: normalizedEnd });
   state.groupNotes = { ...(state.groupNotes || {}) };
-  if (nextNote) state.groupNotes[finalRowId] = nextNote;
+  if (nextNote && !metaTask) state.groupNotes[finalRowId] = nextNote;
   else delete state.groupNotes[finalRowId];
   state.editorRowId = finalRowId;
 
