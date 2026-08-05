@@ -39,6 +39,7 @@ const FULL_SYNC_INTERVAL_MS = 300000;
 const SYNC_RETRY_INTERVAL_MS = 30000;
 const DEFAULT_COLLAPSED_REVIEW_SECTIONS = ["upload-only", "missing-upload", "completed"];
 const STALE_REVIEW_BACKLOG_DAYS = 2;
+const MISSING_UPLOAD_STALE_DAYS = 30;
 const COMPLETED_HIDE_GRACE_DAYS = 1;
 const PINNED_CHANNELS = [
   { name: "현대카드" },
@@ -2264,7 +2265,7 @@ function isStaleMissingUploadProject(tasks) {
   const list = tasks || [];
   if (!isMissingUploadProject(list) || list.some(isActiveTask)) return false;
   const range = rangeOf(list);
-  return daysBetween(range.end, todayString()) >= STALE_REVIEW_BACKLOG_DAYS;
+  return daysBetween(range.end, todayString()) >= MISSING_UPLOAD_STALE_DAYS;
 }
 
 function isUploadOnlyProject(tasks) {
@@ -2710,8 +2711,9 @@ function similarProjectCandidate(left, right) {
 
   const lengthRatio = Math.min(leftKey.length, rightKey.length) / Math.max(leftKey.length, rightKey.length);
   const containment = hasStrongProjectContainment(leftKey, rightKey);
+  const tokenContainment = sharesDistinctiveTokenContainment(left.project, right.project);
   const bigram = sharedBigramScore(leftKey, rightKey);
-  const splitSignal = splitScheduleSimilaritySignal(left, right, leftKey, rightKey, { bigram, containment, lengthRatio });
+  const splitSignal = splitScheduleSimilaritySignal(left, right, leftKey, rightKey, { bigram, containment, tokenContainment, lengthRatio });
   const score = splitSignal?.score ?? (containment ? Math.max(0.82, lengthRatio) : bigram);
   if (!splitSignal && !containment && bigram < 0.72) return null;
   if (score < 0.55) return null;
@@ -2755,13 +2757,14 @@ function splitScheduleSimilaritySignal(left, right, leftKey, rightKey, metrics =
 
   const bigram = Number(metrics.bigram || 0);
   const containment = Boolean(metrics.containment);
+  const tokenContainment = Boolean(metrics.tokenContainment);
   const episodeMatch = sharesEpisodeIdentity(leftKey, rightKey) || canMergeByEpisodeTitle(leftKey, rightKey);
   const anchorMatch = hasSharedProjectAnchor(leftKey, rightKey);
-  const relaxedNameMatch = containment || episodeMatch || anchorMatch || bigram >= 0.58;
+  const relaxedNameMatch = containment || tokenContainment || episodeMatch || anchorMatch || bigram >= 0.58;
   if (!relaxedNameMatch) return null;
 
   const score = Math.max(
-    containment ? Math.max(0.82, Number(metrics.lengthRatio || 0)) : 0,
+    containment || tokenContainment ? Math.max(0.82, Number(metrics.lengthRatio || 0)) : 0,
     episodeMatch ? 0.76 : 0,
     anchorMatch ? 0.66 : 0,
     bigram,
@@ -2981,7 +2984,7 @@ function shouldMergeUploadOnlyProject(uploadProject, candidateProject) {
   const uploadKeys = projectKeysForTasks(uploadProject.tasks);
   const candidateKeys = projectKeysForTasks(candidateProject.tasks);
 
-  return uploadKeys.some((uploadKey) =>
+  const keyMatch = uploadKeys.some((uploadKey) =>
     candidateKeys.some(
       (candidateKey) =>
         isSameProjectKey(uploadKey, candidateKey) ||
@@ -2991,8 +2994,44 @@ function shouldMergeUploadOnlyProject(uploadProject, candidateProject) {
         sharesEmbeddedKoreanName(uploadKey, candidateKey) ||
         sharesTrustedRoot(uploadKey, candidateKey) ||
         hasStrongProjectContainment(uploadKey, candidateKey),
-    ),
+      ),
   );
+  return keyMatch || uploadPairByTokenContainment(uploadProject, candidateProject);
+}
+
+function uploadPairByTokenContainment(uploadProject, candidateProject) {
+  const uploadNames = projectRawNames(uploadProject);
+  const candidateNames = projectRawNames(candidateProject);
+
+  const nameMatch = uploadNames.some((uploadName) =>
+    candidateNames.some((candidateName) => {
+      const uploadKey = canonicalProjectKey(uploadName);
+      const candidateKey = canonicalProjectKey(candidateName);
+      const uploadEpisodes = episodeNumbers(uploadKey);
+      const candidateEpisodes = episodeNumbers(candidateKey);
+      if (uploadEpisodes.size && candidateEpisodes.size && !sharesEpisodeNumber(uploadKey, candidateKey)) {
+        return false;
+      }
+      return sharesDistinctiveTokenContainment(uploadName, candidateName);
+    }),
+  );
+  if (!nameMatch) return false;
+
+  const uploadRange = rangeOf(uploadProject.tasks);
+  const candidateRange = rangeOf(candidateProject.tasks);
+  if (compareDate(uploadRange.start, candidateRange.start) < 0) return false;
+  return daysBetween(candidateRange.end, uploadRange.start) <= 45;
+}
+
+function projectRawNames(project) {
+  const names = new Set();
+  if (project?.name) names.add(project.name);
+  if (project?.aliasName) names.add(project.aliasName);
+  for (const task of project?.tasks || []) {
+    if (task.project) names.add(task.project);
+    if (task.title) names.add(task.title);
+  }
+  return [...names];
 }
 
 function projectKeysForTasks(tasks) {
@@ -3034,6 +3073,38 @@ function sharesNamedKeywordSet(a, b) {
     ["네이버", "웹툰", "숏폼"],
   ];
   return keywordSets.some((keywords) => keywords.every((keyword) => a.includes(keyword) && b.includes(keyword)));
+}
+
+const GENERIC_PROJECT_TOKENS = new Set([
+  "촬영", "재촬영", "업로드", "편집", "가편", "기획", "릴리즈", "게시", "발행", "오픈",
+  "영상", "콘텐츠", "건", "본편", "full", "ver",
+]);
+
+function distinctiveProjectTokens(name) {
+  const cleaned = String(name || "")
+    .replace(/\[[^\]]*\]/g, " ")
+    .replace(/\([^)]*\)/g, " ")
+    .toLowerCase();
+  const tokens = cleaned.split(/[\s/·×x&+,~-]+/).filter(Boolean);
+  const result = new Set();
+  for (const token of tokens) {
+    if (GENERIC_PROJECT_TOKENS.has(token)) continue;
+    if (/^ep\.?\d+/i.test(token)) continue;
+    if (!/[가-힣a-z]{2,}/i.test(token)) continue;
+    result.add(token);
+  }
+  return result;
+}
+
+function sharesDistinctiveTokenContainment(nameA, nameB) {
+  const tokensA = distinctiveProjectTokens(nameA);
+  const tokensB = distinctiveProjectTokens(nameB);
+  if (!tokensA.size || !tokensB.size) return false;
+  const [smaller, larger] = tokensA.size <= tokensB.size ? [tokensA, tokensB] : [tokensB, tokensA];
+  for (const token of smaller) {
+    if (!larger.has(token)) return false;
+  }
+  return true;
 }
 
 function sharesEmbeddedKoreanName(a, b) {
