@@ -1018,8 +1018,51 @@ function baselineSummary(baseline) {
 
 async function getDatabaseSchema(env, databaseId, kind) {
   if (!databaseId) throw httpError(400, `${kind} database id is missing.`);
-  const database = await notionRequest(env, `/v1/databases/${databaseId}`, { method: "GET" });
+  let database = await notionRequest(env, `/v1/databases/${databaseId}`, { method: "GET" });
+  if (kind === "write") {
+    database = await ensureWriteDatabaseProperties(env, database);
+  }
   return summarizeNotionSchema(database, kind, env);
+}
+
+async function ensureWriteDatabaseProperties(env, database) {
+  const props = database.properties || {};
+  const has = (name) => Boolean(name && props[name]);
+  const required = [
+    { name: envValue(env, "NOTION_WRITE_DATE_PROP") || "시작일", def: { date: {} }, aliases: ["날짜", "시작일"], types: ["date"] },
+    { name: envValue(env, "NOTION_WRITE_CHANNEL_PROP") || "채널", def: { rich_text: {} }, aliases: ["채널", "채널명"] },
+    { name: envValue(env, "NOTION_WRITE_PROJECT_PROP") || "프로젝트명", def: { rich_text: {} }, aliases: ["프로젝트"] },
+    { name: envValue(env, "NOTION_WRITE_DETAIL_PROP") || "일정", def: { rich_text: {} }, aliases: ["일정", "카테고리"] },
+    { name: envValue(env, "NOTION_WRITE_STATUS_PROP") || "상태", def: { rich_text: {} }, aliases: ["상태"] },
+    { name: envValue(env, "NOTION_WRITE_ASSIGNEE_PROP") || "담당자", def: { rich_text: {} }, aliases: ["담당자", "사람"] },
+    { name: envValue(env, "NOTION_WRITE_DESCRIPTION_PROP") || "메모", def: { rich_text: {} }, aliases: ["메모", "내용"] },
+    { name: envValue(env, "NOTION_WRITE_ORIGIN_ID_PROP") || "원본 ID", def: { rich_text: {} }, aliases: ["원본 ID", "원본ID"] },
+  ];
+
+  const propNamesNormalized = new Map(Object.keys(props).map((name) => [normalizeLabel(name), name]));
+  const additions = {};
+  for (const item of required) {
+    if (has(item.name)) continue;
+    const aliasHit = item.aliases.some((alias) => {
+      const existing = propNamesNormalized.get(normalizeLabel(alias));
+      if (!existing) return false;
+      return !item.types || item.types.includes(props[existing]?.type);
+    });
+    if (aliasHit) continue;
+    additions[item.name] = item.def;
+  }
+
+  if (!Object.keys(additions).length) return database;
+  try {
+    const updated = await notionRequest(env, `/v1/databases/${database.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ properties: additions }),
+    });
+    if (updated?.properties) return updated;
+    return await notionRequest(env, `/v1/databases/${database.id}`, { method: "GET" });
+  } catch {
+    return database;
+  }
 }
 
 function summarizeNotionSchema(database, kind, env) {
