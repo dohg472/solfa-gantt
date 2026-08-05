@@ -4,8 +4,8 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>솔파 간트</title>
-    <link rel="stylesheet" href="/styles.css?v=20260804-review-slack-alerts" />
-    <script src="/app.js?v=20260804-review-slack-alerts" defer></script>
+    <link rel="stylesheet" href="/styles.css?v=20260805-plan-inline-media" />
+    <script src="/app.js?v=20260805-plan-inline-media" defer></script>
   </head>
   <body>
     <div class="app">
@@ -167,13 +167,19 @@
               <span>내용</span>
               <textarea id="descriptionField" name="description" rows="4"></textarea>
             </label>
-            <section id="sourceContentSection" class="source-content-section" hidden>
-              <div class="source-content-head">
-                <span>프로덕션 플랜 내용</span>
-                <span id="sourceContentStatus">불러오는 중</span>
+            <div id="planContent" class="plan-content" hidden>
+              <div class="plan-content-meta">
+                <span>플랜 내용</span>
+                <span id="planContentStatus"></span>
               </div>
-              <div id="sourceContentBody" class="source-content-body" aria-live="polite"></div>
-            </section>
+              <div id="planContentBody" class="plan-content-body" aria-live="polite"></div>
+              <div id="planContentMedia" class="plan-content-media" hidden></div>
+              <div class="plan-attach-row">
+                <input id="planAttachInput" type="file" hidden />
+                <button type="button" id="planAttachButton" class="plan-attach-button">📎 사진/파일 추가</button>
+                <span id="planAttachStatus" class="plan-attach-status"></span>
+              </div>
+            </div>
             <div class="form-grid">
               <label>
                 <span>시작</span>

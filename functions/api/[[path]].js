@@ -109,6 +109,11 @@ async function route({ request, env }) {
     return json(await getTaskPageContent(env, decodeURIComponent(taskContentMatch[1])));
   }
 
+  const taskAttachMatch = path.match(/^\/tasks\/(.+)\/attachments$/);
+  if (taskAttachMatch && request.method === "POST") {
+    return json(await addTaskAttachment(env, decodeURIComponent(taskAttachMatch[1]), request), 201);
+  }
+
   const taskHideMatch = path.match(/^\/tasks\/(.+)\/hide$/);
   if (taskHideMatch && request.method === "POST") {
     return json(await hideTask(env, decodeURIComponent(taskHideMatch[1])));
@@ -1237,15 +1242,68 @@ async function getTaskPageContent(env, id) {
       : "";
   if (!source) throw httpError(404, "간트에 연결된 프로덕션 플랜 페이지가 아닙니다.");
 
-  const context = { lines: [], blockCount: 0, charCount: 0, truncated: false };
+  const context = { lines: [], media: [], blockCount: 0, charCount: 0, truncated: false };
   await collectNotionBlockContent(env, pageId, 0, context);
   return {
     pageId: page.id || pageId,
     source,
     content: context.lines.join("\n").trim(),
+    media: context.media,
     blockCount: context.blockCount,
     truncated: context.truncated,
   };
+}
+
+async function addTaskAttachment(env, id, request) {
+  const pageId = String(id || "").split(":")[0].trim();
+  if (!pageId) throw httpError(400, "첨부할 일정 ID가 없습니다.");
+  const page = await notionRequest(env, `/v1/pages/${encodeURIComponent(pageId)}`, { method: "GET" });
+  const readDatabaseId = config(env).readDatabaseId;
+  const writeDatabaseId = config(env).writeDatabaseId;
+  if (!pageBelongsToDatabase(page, readDatabaseId) && !pageBelongsToDatabase(page, writeDatabaseId)) {
+    throw httpError(404, "간트에 연결된 프로덕션 플랜 페이지가 아닙니다.");
+  }
+
+  const form = await request.formData();
+  const file = form.get("file");
+  if (!file || typeof file === "string") throw httpError(400, "업로드할 파일이 없습니다.");
+  if (file.size > 20 * 1024 * 1024) throw httpError(400, "20MB 이하 파일만 업로드할 수 있습니다.");
+
+  const filename = String(file.name || "attachment").slice(0, 200);
+  const contentType = file.type || "application/octet-stream";
+
+  const upload = await notionRequest(env, "/v1/file_uploads", {
+    method: "POST",
+    body: JSON.stringify({ filename, content_type: contentType }),
+  });
+
+  const sendForm = new FormData();
+  sendForm.append("file", file, filename);
+  const token = secretValue(env, "NOTION_TOKEN");
+  const sendResponse = await fetch(`https://api.notion.com/v1/file_uploads/${upload.id}/send`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Notion-Version": envValue(env, "NOTION_VERSION") || "2022-06-28",
+    },
+    body: sendForm,
+  });
+  if (!sendResponse.ok) {
+    const detail = await sendResponse.text();
+    throw httpError(sendResponse.status, `노션 파일 업로드 실패: ${detail.slice(0, 200)}`);
+  }
+
+  const isImage = /^image\/(png|jpe?g|gif|webp|heic|svg\+xml)$/i.test(contentType);
+  const block = isImage
+    ? { object: "block", type: "image", image: { type: "file_upload", file_upload: { id: upload.id } } }
+    : { object: "block", type: "file", file: { type: "file_upload", file_upload: { id: upload.id }, name: filename } };
+
+  await notionRequest(env, `/v1/blocks/${encodeURIComponent(pageId)}/children`, {
+    method: "PATCH",
+    body: JSON.stringify({ children: [block] }),
+  });
+
+  return { ok: true, filename };
 }
 
 async function collectNotionBlockContent(env, blockId, depth, context) {
@@ -1265,6 +1323,19 @@ async function collectNotionBlockContent(env, blockId, depth, context) {
         return;
       }
       context.blockCount += 1;
+      const type = block?.type || "";
+      const value = block?.[type] || {};
+      if (["image", "video", "audio", "file", "pdf"].includes(type)) {
+        const url = value.file?.url || value.external?.url || "";
+        if (url && context.media.length < 20) {
+          const labels = { image: "이미지", video: "영상", audio: "오디오", file: "파일", pdf: "PDF" };
+          context.media.push({
+            kind: type === "image" ? "image" : "file",
+            url,
+            label: plainText(value.caption) || value.name || labels[type],
+          });
+        }
+      }
       const line = notionBlockText(block);
       if (line) appendNotionContentLine(context, `${"  ".repeat(depth)}${line}`);
       if (block.has_children && depth < PAGE_CONTENT_MAX_DEPTH && !context.truncated) {

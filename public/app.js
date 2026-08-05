@@ -256,9 +256,13 @@ const els = {
   projectField: document.getElementById("projectField"),
   detailField: document.getElementById("detailField"),
   descriptionField: document.getElementById("descriptionField"),
-  sourceContentSection: document.getElementById("sourceContentSection"),
-  sourceContentStatus: document.getElementById("sourceContentStatus"),
-  sourceContentBody: document.getElementById("sourceContentBody"),
+  planContent: document.getElementById("planContent"),
+  planContentStatus: document.getElementById("planContentStatus"),
+  planContentBody: document.getElementById("planContentBody"),
+  planContentMedia: document.getElementById("planContentMedia"),
+  planAttachButton: document.getElementById("planAttachButton"),
+  planAttachInput: document.getElementById("planAttachInput"),
+  planAttachStatus: document.getElementById("planAttachStatus"),
   startField: document.getElementById("startField"),
   endField: document.getElementById("endField"),
   statusField: document.getElementById("statusField"),
@@ -426,6 +430,8 @@ function bindEvents() {
     const preset = detailPresetFor(els.detailField.value);
     if (preset) renderSwatches(preset.color);
   });
+  els.planAttachButton?.addEventListener("click", () => els.planAttachInput?.click());
+  els.planAttachInput?.addEventListener("change", handlePlanAttachChange);
   els.todayButton.addEventListener("click", scrollToToday);
   els.collapseAllButton.addEventListener("click", collapseAllGroups);
   els.expandAllButton.addEventListener("click", expandAllGroups);
@@ -11259,35 +11265,50 @@ function syncEditor() {
 }
 
 function resetTaskSourceContent() {
-  if (!els.sourceContentSection) return;
-  els.sourceContentSection.hidden = true;
-  els.sourceContentSection.dataset.pageId = "";
-  els.sourceContentSection.dataset.state = "";
-  if (els.sourceContentStatus) els.sourceContentStatus.textContent = "";
-  if (els.sourceContentBody) els.sourceContentBody.textContent = "";
+  if (!els.planContent) return;
+  els.planContent.hidden = true;
+  els.planContent.dataset.pageId = "";
+  els.planContent.dataset.state = "";
+  els.descriptionField?.classList.toggle("has-plan-content", false);
+  if (els.planContentStatus) els.planContentStatus.textContent = "";
+  if (els.planContentBody) els.planContentBody.textContent = "";
+  if (els.planContentMedia) {
+    els.planContentMedia.replaceChildren();
+    els.planContentMedia.hidden = true;
+  }
+  if (els.planAttachStatus) els.planAttachStatus.textContent = "";
 }
 
 function syncTaskSourceContent(task) {
-  if (!els.sourceContentSection || !els.sourceContentBody || !els.sourceContentStatus) return;
+  if (!els.planContent || !els.planContentBody || !els.planContentStatus || !els.planContentMedia) return;
   const pageId = taskContentPageId(task);
   if (!pageId) {
     resetTaskSourceContent();
     return;
   }
 
-  els.sourceContentSection.hidden = false;
-  if (els.sourceContentSection.dataset.pageId === pageId && els.sourceContentSection.dataset.state) return;
-  els.sourceContentSection.dataset.pageId = pageId;
+  els.planContent.hidden = false;
+  els.descriptionField?.classList.toggle("has-plan-content", true);
+  const samePage = els.planContent.dataset.pageId === pageId;
+  els.planContent.dataset.pageId = pageId;
 
-  const cached = state.taskContentCache.get(pageId);
+  let cached = state.taskContentCache.get(pageId);
+  if (cached && Date.now() - cached.fetchedAt > 30 * 60 * 1000) {
+    state.taskContentCache.delete(pageId);
+    els.planContent.dataset.state = "";
+    cached = null;
+  }
   if (cached) {
     renderTaskSourceContent(pageId, cached);
     return;
   }
+  if (samePage && els.planContent.dataset.state === "loading") return;
 
-  els.sourceContentSection.dataset.state = "loading";
-  els.sourceContentStatus.textContent = "불러오는 중";
-  els.sourceContentBody.textContent = "";
+  els.planContent.dataset.state = "loading";
+  els.planContentStatus.textContent = "불러오는 중";
+  els.planContentBody.textContent = "";
+  els.planContentMedia.replaceChildren();
+  els.planContentMedia.hidden = true;
   loadTaskSourceContent(pageId);
 }
 
@@ -11303,14 +11324,23 @@ function loadTaskSourceContent(pageId) {
         if (!response.ok) throw new Error(result.error || "프로덕션 플랜 내용을 불러오지 못했습니다.");
         const normalized = {
           content: String(result.content || "").trim(),
+          media: Array.isArray(result.media) ? result.media : [],
           blockCount: Number(result.blockCount || 0),
           truncated: Boolean(result.truncated),
+          fetchedAt: Date.now(),
         };
         state.taskContentCache.set(pageId, normalized);
         return normalized;
       })
       .catch((error) => {
-        const failed = { content: "", blockCount: 0, truncated: false, error: error.message || "내용을 불러오지 못했습니다." };
+        const failed = {
+          content: "",
+          media: [],
+          blockCount: 0,
+          truncated: false,
+          fetchedAt: Date.now(),
+          error: error.message || "내용을 불러오지 못했습니다.",
+        };
         state.taskContentCache.set(pageId, failed);
         return failed;
       })
@@ -11322,20 +11352,77 @@ function loadTaskSourceContent(pageId) {
 }
 
 function renderTaskSourceContent(pageId, result) {
-  if (els.sourceContentSection?.dataset.pageId !== pageId) return;
-  els.sourceContentSection.dataset.state = result.error ? "error" : "ready";
+  if (els.planContent?.dataset.pageId !== pageId) return;
+  els.planContent.dataset.state = result.error ? "error" : "ready";
+  els.planContentBody.textContent = result.content;
+  els.planContentMedia.replaceChildren();
+  const media = (result.media || []).filter((item) => /^https?:\/\//i.test(item?.url || ""));
+  for (const item of media) {
+    const link = document.createElement("a");
+    link.href = item.url;
+    link.target = "_blank";
+    link.rel = "noopener";
+    if (item.kind === "image") {
+      link.className = "plan-image-link";
+      const image = document.createElement("img");
+      image.className = "plan-image";
+      image.src = item.url;
+      image.alt = item.label;
+      image.loading = "lazy";
+      link.append(image);
+    } else {
+      link.className = "plan-file";
+      link.textContent = `📎 ${item.label}`;
+    }
+    els.planContentMedia.append(link);
+  }
+  els.planContentMedia.hidden = !media.length;
   if (result.error) {
-    els.sourceContentStatus.textContent = "불러오기 실패";
-    els.sourceContentBody.textContent = result.error;
+    els.planContentStatus.textContent = "불러오기 실패";
+    els.planContentBody.textContent = result.error;
     return;
   }
-  if (!result.content) {
-    els.sourceContentStatus.textContent = "내용 없음";
-    els.sourceContentBody.textContent = "등록된 페이지 본문이 없습니다.";
+  if (result.blockCount === 0 && !media.length) {
+    els.planContentStatus.textContent = "플랜 본문 없음";
+    els.planContentBody.textContent = "";
     return;
   }
-  els.sourceContentStatus.textContent = result.truncated ? "일부 표시" : `${result.blockCount}개 블록`;
-  els.sourceContentBody.textContent = result.content;
+  els.planContentStatus.textContent = result.truncated ? "일부 표시" : `${result.blockCount}개 블록`;
+}
+
+async function handlePlanAttachChange() {
+  const file = els.planAttachInput?.files?.[0];
+  if (els.planAttachInput) els.planAttachInput.value = "";
+  if (!file) return;
+  const pageId = els.planContent?.dataset.pageId || "";
+  if (!pageId) return;
+  if (file.size > 20 * 1024 * 1024) {
+    els.planAttachStatus.textContent = "20MB 이하만 업로드할 수 있습니다.";
+    return;
+  }
+  els.planAttachButton.disabled = true;
+  els.planAttachStatus.textContent = "업로드 중…";
+  try {
+    const form = new FormData();
+    form.append("file", file, file.name);
+    const response = await fetch(apiUrl(`/api/tasks/${encodeURIComponent(pageId)}/attachments`), {
+      method: "POST",
+      body: form,
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || "업로드하지 못했습니다.");
+    state.taskContentCache.delete(pageId);
+    els.planContent.dataset.state = "";
+    els.planAttachStatus.textContent = "추가됨";
+    loadTaskSourceContent(pageId);
+    setTimeout(() => {
+      if (els.planAttachStatus.textContent === "추가됨") els.planAttachStatus.textContent = "";
+    }, 3000);
+  } catch (error) {
+    els.planAttachStatus.textContent = error.message || "업로드하지 못했습니다.";
+  } finally {
+    els.planAttachButton.disabled = false;
+  }
 }
 
 function editorGroupRow() {
@@ -11343,6 +11430,8 @@ function editorGroupRow() {
 }
 
 function syncGroupEditor(row) {
+  if (els.planContent) els.planContent.hidden = true;
+  els.descriptionField?.classList.toggle("has-plan-content", false);
   setGroupEditorFieldMode(row);
   const label = groupKindLabel(row.kind);
   els.editorTitle.textContent = `${row.title} · ${label}`;
