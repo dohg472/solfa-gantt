@@ -11393,20 +11393,18 @@ function renderTaskSourceContent(pageId, result) {
     return;
   }
   els.planContentStatus.textContent = "";
-  if (result.blockCount === 0 && !media.length) {
-    els.planContentBody.textContent = "";
-  }
+  els.planContentBody.textContent = "";
   const currentTask = state.editorMode === "task" && state.editorOpen ? selectedTask() : null;
   const isCurrentTask = taskContentPageId(currentTask) === pageId;
-  if (result.editable && isCurrentTask) {
-    els.planContentBody.textContent = "";
-    if (!state.planEdit.dirty && document.activeElement !== els.descriptionField) {
-      els.descriptionField.value = result.planText || els.descriptionField.value;
-    }
-    state.planEdit = { pageId, editable: true, snapshot: els.descriptionField.value, dirty: false };
-  } else if (!result.editable) {
-    state.planEdit = { pageId, editable: false, snapshot: "", dirty: false };
-    els.planContentStatus.textContent = "플랜 본문은 노션에서 수정할 수 있어요";
+  const seedText = result.planText || "";
+  if (
+    isCurrentTask &&
+    seedText &&
+    !state.planEdit.dirty &&
+    document.activeElement !== els.descriptionField &&
+    !els.descriptionField.value.trim()
+  ) {
+    els.descriptionField.value = seedText;
   }
 }
 
@@ -11835,33 +11833,12 @@ async function saveEditor() {
 
   const optimistic = { ...task, ...patch };
   const changes = editorChangeItems(task, optimistic);
-  const planEdit = state.planEdit;
-  const planChanged = planEdit.editable && planEdit.pageId === taskContentPageId(task) && els.descriptionField.value !== planEdit.snapshot;
-  if (!changes.length && !planChanged) {
+  if (!changes.length) {
     showToast("바뀐 내용이 없습니다.");
     return;
   }
 
-  if (changes.length && !(await confirmEditorChangePreview(task, optimistic, changes))) return;
-
-  if (planChanged) {
-    try {
-      const response = await fetch(apiUrl(`/api/tasks/${encodeURIComponent(planEdit.pageId)}/content`), {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: els.descriptionField.value }),
-      });
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.error || "플랜 내용을 저장하지 못했습니다.");
-      state.planEdit.snapshot = els.descriptionField.value;
-      state.taskContentCache.delete(planEdit.pageId);
-      showToast("플랜 내용을 저장했습니다.");
-    } catch (error) {
-      showToast(`플랜 내용 저장 실패: ${error.message}`);
-    }
-  }
-
-  if (!changes.length) return;
+  if (!(await confirmEditorChangePreview(task, optimistic, changes))) return;
 
   const rescheduleMode = editorRescheduleMode(task, optimistic);
   await applyBulkTaskUpdates([optimistic], `"${task.detail || task.title}" 편집 저장`, { rescheduleMode });

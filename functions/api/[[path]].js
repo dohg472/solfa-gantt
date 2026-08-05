@@ -111,9 +111,6 @@ async function route({ request, env }) {
   if (taskContentMatch && request.method === "GET") {
     return json(await getTaskPageContent(env, decodeURIComponent(taskContentMatch[1])));
   }
-  if (taskContentMatch && request.method === "PUT") {
-    return json(await saveTaskPageContent(env, decodeURIComponent(taskContentMatch[1]), await readJson(request)));
-  }
 
   const taskAttachMatch = path.match(/^\/tasks\/(.+)\/attachments$/);
   if (taskAttachMatch && request.method === "POST") {
@@ -1262,86 +1259,7 @@ async function getTaskPageContent(env, id) {
   };
 }
 
-async function saveTaskPageContent(env, id, body) {
-  const pageId = String(id || "").split(":")[0].trim();
-  if (!pageId) throw httpError(400, "저장할 일정 ID가 없습니다.");
-  const page = await notionRequest(env, `/v1/pages/${encodeURIComponent(pageId)}`, { method: "GET" });
-  const readDatabaseId = config(env).readDatabaseId;
-  const writeDatabaseId = config(env).writeDatabaseId;
-  if (!pageBelongsToDatabase(page, readDatabaseId) && !pageBelongsToDatabase(page, writeDatabaseId)) {
-    throw httpError(404, "간트에 연결된 프로덕션 플랜 페이지가 아닙니다.");
-  }
 
-  const listed = await listTopLevelNotionBlocks(env, pageId, 100);
-  const topBlocks = listed.blocks.map(notionTopBlock);
-  const contentTruncated = topLevelContentTruncated(listed.blocks, listed.truncated);
-  if (!isEditableTaskPage(topBlocks, contentTruncated)) {
-    throw httpError(409, "플랜 페이지 구조가 복잡해서 간트에서 수정할 수 없습니다. 노션에서 수정해주세요.");
-  }
-
-  const newBlocks = parsePlanText(body?.text);
-  const oldTextBlocks = topBlocks.filter((block) => PLAN_EDITABLE_TEXT_TYPES.has(block.type));
-  const sharedCount = Math.min(oldTextBlocks.length, newBlocks.length);
-  let anchorId = "";
-
-  for (let index = 0; index < sharedCount; index += 1) {
-    const oldBlock = oldTextBlocks[index];
-    const newBlock = newBlocks[index];
-    if (oldBlock.type === newBlock.type) {
-      await notionRequest(env, `/v1/blocks/${encodeURIComponent(oldBlock.id)}`, {
-        method: "PATCH",
-        body: JSON.stringify({ [newBlock.type]: newBlock[newBlock.type] }),
-      });
-      anchorId = oldBlock.id;
-      continue;
-    }
-
-    await notionRequest(env, `/v1/blocks/${encodeURIComponent(oldBlock.id)}`, { method: "DELETE" });
-    const inserted = await notionRequest(env, `/v1/blocks/${encodeURIComponent(pageId)}/children`, {
-      method: "PATCH",
-      body: JSON.stringify({
-        children: [newBlock],
-        ...(anchorId ? { after: anchorId } : {}),
-      }),
-    });
-    anchorId = inserted.results?.[0]?.id || anchorId;
-  }
-
-  for (let index = sharedCount; index < oldTextBlocks.length; index += 1) {
-    await notionRequest(env, `/v1/blocks/${encodeURIComponent(oldTextBlocks[index].id)}`, { method: "DELETE" });
-  }
-
-  if (newBlocks.length > sharedCount) {
-    await notionRequest(env, `/v1/blocks/${encodeURIComponent(pageId)}/children`, {
-      method: "PATCH",
-      body: JSON.stringify({
-        children: newBlocks.slice(sharedCount),
-        ...(anchorId ? { after: anchorId } : {}),
-      }),
-    });
-  }
-
-  return { ok: true, planText: serializePlanBlocks(newBlocks.map(notionTopBlock)) };
-}
-
-async function listTopLevelNotionBlocks(env, pageId, limit = 100) {
-  const blocks = [];
-  let cursor = "";
-  let truncated = false;
-  do {
-    const query = new URLSearchParams({ page_size: String(Math.min(100, limit - blocks.length)) });
-    if (cursor) query.set("start_cursor", cursor);
-    const result = await notionRequest(
-      env,
-      `/v1/blocks/${encodeURIComponent(pageId)}/children?${query.toString()}`,
-      { method: "GET" },
-    );
-    blocks.push(...(result.results || []).slice(0, limit - blocks.length));
-    cursor = result.has_more ? result.next_cursor || "" : "";
-    truncated = Boolean(cursor && blocks.length >= limit);
-  } while (cursor && blocks.length < limit);
-  return { blocks, truncated };
-}
 
 function notionTopBlock(block) {
   const type = block?.type || "";
@@ -1363,51 +1281,7 @@ function isEditableTaskPage(topBlocks, truncated) {
   });
 }
 
-function topLevelContentTruncated(blocks, listingTruncated) {
-  if (listingTruncated) return true;
-  const context = { lines: [], charCount: 0, truncated: false };
-  for (const block of blocks) {
-    const line = notionBlockText(block);
-    if (line) appendNotionContentLine(context, line);
-    if (context.truncated) return true;
-  }
-  return false;
-}
 
-function parsePlanText(value) {
-  return String(value || "")
-    .split("\n")
-    .map((line) => line.trimEnd())
-    .filter(Boolean)
-    .slice(0, PLAN_EDITABLE_MAX_BLOCKS)
-    .map((line) => {
-      let type = "paragraph";
-      let checked = false;
-      let content = line;
-      if (line.startsWith("• ") || line.startsWith("- ")) {
-        type = "bulleted_list_item";
-        content = line.slice(2);
-      } else if (line.startsWith("[x] ") || line.startsWith("[X] ")) {
-        type = "to_do";
-        checked = true;
-        content = line.slice(4);
-      } else if (line.startsWith("[ ] ")) {
-        type = "to_do";
-        content = line.slice(4);
-      } else if (line.startsWith("> ")) {
-        type = "quote";
-        content = line.slice(2);
-      }
-      return {
-        object: "block",
-        type,
-        [type]: {
-          rich_text: [{ type: "text", text: { content: content.slice(0, 1900) } }],
-          ...(type === "to_do" ? { checked } : {}),
-        },
-      };
-    });
-}
 
 function serializePlanBlocks(blocks) {
   return blocks
