@@ -137,6 +137,7 @@ const state = {
   context: null,
   editorMode: "task",
   editorRowId: "",
+  planEdit: { pageId: "", editable: false, snapshot: "", dirty: false },
   collapsedRows: new Set(),
   showDependencies: true,
   rescheduleDependencies: true,
@@ -503,6 +504,9 @@ function bindEvents() {
   els.undoButton.addEventListener("click", runUndo);
   els.redoButton.addEventListener("click", runRedo);
   els.closeEditorButton.addEventListener("click", closeEditor);
+  els.descriptionField.addEventListener("input", () => {
+    state.planEdit.dirty = true;
+  });
   els.editor.addEventListener("keydown", (event) => {
     if (handleUndoRedoShortcut(event)) {
       event.stopPropagation();
@@ -11211,6 +11215,7 @@ async function deleteReviewIgnoreFromPanel(button) {
 }
 
 function syncEditor() {
+  state.planEdit = { pageId: "", editable: false, snapshot: "", dirty: false };
   const groupRow = state.editorMode === "group" ? editorGroupRow() : null;
   const task = state.editorMode === "group" ? null : selectedTask();
   const isGroupOpen = state.editorOpen && groupRow;
@@ -11327,6 +11332,8 @@ function loadTaskSourceContent(pageId) {
           media: Array.isArray(result.media) ? result.media : [],
           blockCount: Number(result.blockCount || 0),
           truncated: Boolean(result.truncated),
+          planText: String(result.planText || ""),
+          editable: Boolean(result.editable),
           fetchedAt: Date.now(),
         };
         state.taskContentCache.set(pageId, normalized);
@@ -11338,6 +11345,8 @@ function loadTaskSourceContent(pageId) {
           media: [],
           blockCount: 0,
           truncated: false,
+          planText: "",
+          editable: false,
           fetchedAt: Date.now(),
           error: error.message || "내용을 불러오지 못했습니다.",
         };
@@ -11380,11 +11389,24 @@ function renderTaskSourceContent(pageId, result) {
   if (result.error) {
     els.planContentStatus.textContent = `플랜 내용을 불러오지 못했습니다: ${result.error}`;
     els.planContentBody.textContent = "";
+    state.planEdit = { pageId, editable: false, snapshot: "", dirty: false };
     return;
   }
   els.planContentStatus.textContent = "";
   if (result.blockCount === 0 && !media.length) {
     els.planContentBody.textContent = "";
+  }
+  const currentTask = state.editorMode === "task" && state.editorOpen ? selectedTask() : null;
+  const isCurrentTask = taskContentPageId(currentTask) === pageId;
+  if (result.editable && isCurrentTask) {
+    els.planContentBody.textContent = "";
+    if (!state.planEdit.dirty && document.activeElement !== els.descriptionField) {
+      els.descriptionField.value = result.planText || els.descriptionField.value;
+    }
+    state.planEdit = { pageId, editable: true, snapshot: els.descriptionField.value, dirty: false };
+  } else if (!result.editable) {
+    state.planEdit = { pageId, editable: false, snapshot: "", dirty: false };
+    els.planContentStatus.textContent = "플랜 본문은 노션에서 수정할 수 있어요";
   }
 }
 
@@ -11813,12 +11835,33 @@ async function saveEditor() {
 
   const optimistic = { ...task, ...patch };
   const changes = editorChangeItems(task, optimistic);
-  if (!changes.length) {
+  const planEdit = state.planEdit;
+  const planChanged = planEdit.editable && planEdit.pageId === taskContentPageId(task) && els.descriptionField.value !== planEdit.snapshot;
+  if (!changes.length && !planChanged) {
     showToast("바뀐 내용이 없습니다.");
     return;
   }
 
-  if (!(await confirmEditorChangePreview(task, optimistic, changes))) return;
+  if (changes.length && !(await confirmEditorChangePreview(task, optimistic, changes))) return;
+
+  if (planChanged) {
+    try {
+      const response = await fetch(apiUrl(`/api/tasks/${encodeURIComponent(planEdit.pageId)}/content`), {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: els.descriptionField.value }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "플랜 내용을 저장하지 못했습니다.");
+      state.planEdit.snapshot = els.descriptionField.value;
+      state.taskContentCache.delete(planEdit.pageId);
+      showToast("플랜 내용을 저장했습니다.");
+    } catch (error) {
+      showToast(`플랜 내용 저장 실패: ${error.message}`);
+    }
+  }
+
+  if (!changes.length) return;
 
   const rescheduleMode = editorRescheduleMode(task, optimistic);
   await applyBulkTaskUpdates([optimistic], `"${task.detail || task.title}" 편집 저장`, { rescheduleMode });
