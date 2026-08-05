@@ -11387,7 +11387,25 @@ function renderTaskSourceContent(pageId, result) {
       link.className = "plan-file";
       link.textContent = `📎 ${item.label}`;
     }
-    els.planContentMedia.append(link);
+    if (item.ganttOnly && item.id) {
+      const wrap = document.createElement("span");
+      wrap.className = "plan-media-item";
+      wrap.append(link);
+      const removeButton = document.createElement("button");
+      removeButton.type = "button";
+      removeButton.className = "plan-media-remove";
+      removeButton.textContent = "×";
+      removeButton.title = "첨부 삭제";
+      removeButton.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        handlePlanAttachmentRemove(removeButton, item, pageId);
+      });
+      wrap.append(removeButton);
+      els.planContentMedia.append(wrap);
+    } else {
+      els.planContentMedia.append(link);
+    }
   }
   els.planContentMedia.hidden = !media.length;
   if (result.error) {
@@ -11409,6 +11427,38 @@ function renderTaskSourceContent(pageId, result) {
     !els.descriptionField.value.trim()
   ) {
     els.descriptionField.value = seedText;
+  }
+}
+
+async function handlePlanAttachmentRemove(button, item, pageId) {
+  if (button.dataset.armed !== "true") {
+    button.dataset.armed = "true";
+    button.textContent = "삭제?";
+    button.classList.add("is-armed");
+    setTimeout(() => {
+      button.dataset.armed = "";
+      button.textContent = "×";
+      button.classList.remove("is-armed");
+    }, 4000);
+    return;
+  }
+  button.disabled = true;
+  try {
+    const response = await fetch(apiUrl(`/api/attachments/${encodeURIComponent(item.id)}?page=${encodeURIComponent(pageId)}`), {
+      method: "DELETE",
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || "삭제하지 못했습니다.");
+    state.taskContentCache.delete(pageId);
+    els.planContent.dataset.state = "";
+    loadTaskSourceContent(pageId);
+    if (els.planAttachStatus) els.planAttachStatus.textContent = "첨부를 삭제했습니다.";
+    setTimeout(() => {
+      if (els.planAttachStatus?.textContent === "첨부를 삭제했습니다.") els.planAttachStatus.textContent = "";
+    }, 3000);
+  } catch (error) {
+    if (els.planAttachStatus) els.planAttachStatus.textContent = error.message || "삭제하지 못했습니다.";
+    button.disabled = false;
   }
 }
 

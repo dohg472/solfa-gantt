@@ -2028,6 +2028,42 @@ body.is-dragging .gantt-bar.task .bar-handle::after {
   white-space: nowrap;
 }
 
+.plan-media-item {
+  position: relative;
+  display: inline-flex;
+}
+
+.plan-media-remove {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  z-index: 2;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.plan-media-remove:hover {
+  color: var(--danger);
+  border-color: rgba(212, 76, 71, 0.4);
+}
+
+.plan-media-remove.is-armed {
+  min-width: auto;
+  padding: 0 6px;
+  border-color: rgba(212, 76, 71, 0.5);
+  background: #fdebec;
+  color: var(--danger);
+}
+
 .plan-attach-row {
   display: flex;
   align-items: center;

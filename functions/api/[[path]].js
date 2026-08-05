@@ -117,6 +117,10 @@ async function route({ request, env }) {
     return serveAttachment(env, attachmentMatch[1]);
   }
 
+  if (attachmentMatch && request.method === "DELETE") {
+    return json(await deleteAttachment(env, attachmentMatch[1], url));
+  }
+
   const taskAttachMatch = path.match(/^\/tasks\/(.+)\/attachments$/);
   if (taskAttachMatch && request.method === "POST") {
     return json(await addTaskAttachment(env, decodeURIComponent(taskAttachMatch[1]), request), 201);
@@ -1259,6 +1263,7 @@ async function getTaskPageContent(env, id) {
     attachments = [];
   }
   const attachmentMedia = (Array.isArray(attachments) ? attachments : []).map((item) => ({
+    id: item.id,
     kind: /^image\//i.test(item.type || "") ? "image" : "file",
     url: `/api/attachments/${item.id}`,
     label: item.name || "파일",
@@ -1363,6 +1368,24 @@ async function serveAttachment(env, attachmentId) {
       "Cache-Control": "private, max-age=3600",
     },
   });
+}
+
+async function deleteAttachment(env, attachmentId, url) {
+  if (!env.SOLPA_GANTT_KV) throw httpError(500, "KV 바인딩이 없습니다.");
+  const pageId = String(url.searchParams.get("page") || "").trim();
+  await env.SOLPA_GANTT_KV.delete(`solpa:gantt:attachment:${attachmentId}`);
+  if (pageId) {
+    const listKey = `solpa:gantt:attachments:${pageId}`;
+    let list = [];
+    try {
+      list = JSON.parse(await env.SOLPA_GANTT_KV.get(listKey) || "[]");
+    } catch {
+      list = [];
+    }
+    const next = (Array.isArray(list) ? list : []).filter((item) => item.id !== attachmentId);
+    await env.SOLPA_GANTT_KV.put(listKey, JSON.stringify(next));
+  }
+  return { ok: true };
 }
 
 async function collectNotionBlockContent(env, blockId, depth, context) {
