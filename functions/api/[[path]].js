@@ -1,7 +1,7 @@
 const STORE_KEY = "solpa:gantt:store:v1";
 const TASK_CACHE_KEY = "solpa:gantt:tasks-cache:v1";
 const TASK_CACHE_MS = 5 * 60 * 1000;
-const COMPLETED_HIDE_GRACE_DAYS = 0;
+const COMPLETED_HIDE_GRACE_DAYS = 1;
 const PAGE_CONTENT_MAX_BLOCKS = 180;
 const PAGE_CONTENT_MAX_CHARS = 16000;
 const PAGE_CONTENT_MAX_DEPTH = 3;

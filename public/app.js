@@ -38,8 +38,8 @@ const SYNC_STATUS_INTERVAL_MS = 15000;
 const FULL_SYNC_INTERVAL_MS = 300000;
 const SYNC_RETRY_INTERVAL_MS = 30000;
 const DEFAULT_COLLAPSED_REVIEW_SECTIONS = ["upload-only", "missing-upload", "completed"];
-const STALE_REVIEW_BACKLOG_DAYS = 14;
-const COMPLETED_HIDE_GRACE_DAYS = 0;
+const STALE_REVIEW_BACKLOG_DAYS = 2;
+const COMPLETED_HIDE_GRACE_DAYS = 1;
 const PINNED_CHANNELS = [
   { name: "현대카드" },
   { name: "Hup!" },
@@ -3321,7 +3321,7 @@ function projectVisibilityState(tasks) {
       kind: "completed",
       label: "업로드 완료",
       tone: "ok",
-      reason: `업로드가 ${dateLabel(latestUploadEnd)}에 끝나 다음 날부터 기본 숨김 대상입니다`,
+      reason: `업로드가 ${dateLabel(latestUploadEnd)}에 끝나 2일 뒤부터 기본 숨김 대상입니다`,
       hiddenByDefault: true,
       composition,
     };
