@@ -1959,27 +1959,27 @@ body.is-dragging .gantt-bar.task .bar-handle::after {
 }
 
 .plan-content {
-  margin-top: -6px;
-  padding: 8px 10px 9px;
+  margin-top: -16px;
+  padding: 0 11px 10px;
   border: 1px solid var(--line);
   border-top: 0;
-  border-radius: 0 0 4px 4px;
-  background: #f7f7f5;
+  border-radius: 0 0 8px 8px;
+  background: var(--surface-strong);
 }
 
-.plan-content-meta {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+.plan-content-status {
+  display: block;
   color: var(--muted);
   font-size: 11px;
-  font-weight: 600;
+}
+
+.plan-content-status:empty {
+  display: none;
 }
 
 .plan-content-body {
-  margin-top: 5px;
   color: var(--ink);
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1.5;
   white-space: pre-line;
   word-break: break-word;
@@ -2057,8 +2057,10 @@ body.is-dragging .gantt-bar.task .bar-handle::after {
 }
 
 #descriptionField.has-plan-content {
+  border-bottom: 0;
   border-bottom-left-radius: 0;
   border-bottom-right-radius: 0;
+  padding-bottom: 4px;
 }
 
 .source-badge {

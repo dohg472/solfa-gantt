@@ -11305,7 +11305,7 @@ function syncTaskSourceContent(task) {
   if (samePage && els.planContent.dataset.state === "loading") return;
 
   els.planContent.dataset.state = "loading";
-  els.planContentStatus.textContent = "불러오는 중";
+  els.planContentStatus.textContent = "플랜 내용 불러오는 중…";
   els.planContentBody.textContent = "";
   els.planContentMedia.replaceChildren();
   els.planContentMedia.hidden = true;
@@ -11378,16 +11378,14 @@ function renderTaskSourceContent(pageId, result) {
   }
   els.planContentMedia.hidden = !media.length;
   if (result.error) {
-    els.planContentStatus.textContent = "불러오기 실패";
-    els.planContentBody.textContent = result.error;
-    return;
-  }
-  if (result.blockCount === 0 && !media.length) {
-    els.planContentStatus.textContent = "플랜 본문 없음";
+    els.planContentStatus.textContent = `플랜 내용을 불러오지 못했습니다: ${result.error}`;
     els.planContentBody.textContent = "";
     return;
   }
-  els.planContentStatus.textContent = result.truncated ? "일부 표시" : `${result.blockCount}개 블록`;
+  els.planContentStatus.textContent = "";
+  if (result.blockCount === 0 && !media.length) {
+    els.planContentBody.textContent = "";
+  }
 }
 
 async function handlePlanAttachChange() {
