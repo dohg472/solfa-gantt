@@ -11365,17 +11365,21 @@ function renderTaskSourceContent(pageId, result) {
   els.planContent.dataset.state = result.error ? "error" : "ready";
   els.planContentBody.textContent = result.content;
   els.planContentMedia.replaceChildren();
-  const media = (result.media || []).filter((item) => /^https?:\/\//i.test(item?.url || ""));
+  const media = (result.media || []).filter((item) => {
+    const url = String(item?.url || "");
+    return /^https?:\/\//i.test(url) || url.startsWith("/api/");
+  });
   for (const item of media) {
+    const href = String(item.url).startsWith("/api/") ? apiUrl(item.url) : item.url;
     const link = document.createElement("a");
-    link.href = item.url;
+    link.href = href;
     link.target = "_blank";
     link.rel = "noopener";
     if (item.kind === "image") {
       link.className = "plan-image-link";
       const image = document.createElement("img");
       image.className = "plan-image";
-      image.src = item.url;
+      image.src = href;
       image.alt = item.label;
       image.loading = "lazy";
       link.append(image);
@@ -11431,10 +11435,10 @@ async function handlePlanAttachChange() {
     if (!response.ok) throw new Error(result.error || "업로드하지 못했습니다.");
     state.taskContentCache.delete(pageId);
     els.planContent.dataset.state = "";
-    els.planAttachStatus.textContent = "추가됨";
+    els.planAttachStatus.textContent = "추가됨 (간트에만 저장)";
     loadTaskSourceContent(pageId);
     setTimeout(() => {
-      if (els.planAttachStatus.textContent === "추가됨") els.planAttachStatus.textContent = "";
+      if (els.planAttachStatus.textContent === "추가됨 (간트에만 저장)") els.planAttachStatus.textContent = "";
     }, 3000);
   } catch (error) {
     els.planAttachStatus.textContent = error.message || "업로드하지 못했습니다.";

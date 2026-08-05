@@ -112,6 +112,11 @@ async function route({ request, env }) {
     return json(await getTaskPageContent(env, decodeURIComponent(taskContentMatch[1])));
   }
 
+  const attachmentMatch = path.match(/^\/attachments\/([0-9a-f-]+)$/);
+  if (attachmentMatch && request.method === "GET") {
+    return serveAttachment(env, attachmentMatch[1]);
+  }
+
   const taskAttachMatch = path.match(/^\/tasks\/(.+)\/attachments$/);
   if (taskAttachMatch && request.method === "POST") {
     return json(await addTaskAttachment(env, decodeURIComponent(taskAttachMatch[1]), request), 201);
@@ -1247,11 +1252,23 @@ async function getTaskPageContent(env, id) {
 
   const context = { lines: [], media: [], topBlocks: [], blockCount: 0, charCount: 0, truncated: false };
   await collectNotionBlockContent(env, pageId, 0, context);
+  let attachments = [];
+  try {
+    attachments = JSON.parse(await env.SOLPA_GANTT_KV?.get(`solpa:gantt:attachments:${pageId}`) || "[]");
+  } catch {
+    attachments = [];
+  }
+  const attachmentMedia = (Array.isArray(attachments) ? attachments : []).map((item) => ({
+    kind: /^image\//i.test(item.type || "") ? "image" : "file",
+    url: `/api/attachments/${item.id}`,
+    label: item.name || "파일",
+    ganttOnly: true,
+  }));
   return {
     pageId: page.id || pageId,
     source,
     content: context.lines.join("\n").trim(),
-    media: context.media,
+    media: [...context.media, ...attachmentMedia],
     blockCount: context.blockCount,
     truncated: context.truncated,
     editable: isEditableTaskPage(context.topBlocks, context.truncated),
@@ -1308,43 +1325,44 @@ async function addTaskAttachment(env, id, request) {
   const form = await request.formData();
   const file = form.get("file");
   if (!file || typeof file === "string") throw httpError(400, "업로드할 파일이 없습니다.");
-  if (file.size > 20 * 1024 * 1024) throw httpError(400, "20MB 이하 파일만 업로드할 수 있습니다.");
+  if (file.size > 15 * 1024 * 1024) throw httpError(400, "15MB 이하 파일만 업로드할 수 있습니다.");
 
   const filename = String(file.name || "attachment").slice(0, 200);
   const contentType = file.type || "application/octet-stream";
 
-  const upload = await notionRequest(env, "/v1/file_uploads", {
-    method: "POST",
-    body: JSON.stringify({ filename, content_type: contentType }),
+  if (!env.SOLPA_GANTT_KV) throw httpError(500, "Cloudflare KV 바인딩 SOLPA_GANTT_KV가 필요합니다.");
+  const attachmentId = crypto.randomUUID();
+  const bytes = await file.arrayBuffer();
+  await env.SOLPA_GANTT_KV.put(`solpa:gantt:attachment:${attachmentId}`, bytes, {
+    metadata: { name: filename, type: contentType, size: file.size },
   });
 
-  const sendForm = new FormData();
-  sendForm.append("file", file, filename);
-  const token = secretValue(env, "NOTION_TOKEN");
-  const sendResponse = await fetch(`https://api.notion.com/v1/file_uploads/${upload.id}/send`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Notion-Version": envValue(env, "NOTION_VERSION") || "2022-06-28",
-    },
-    body: sendForm,
-  });
-  if (!sendResponse.ok) {
-    const detail = await sendResponse.text();
-    throw httpError(sendResponse.status, `노션 파일 업로드 실패: ${detail.slice(0, 200)}`);
+  const listKey = `solpa:gantt:attachments:${pageId}`;
+  let list = [];
+  try {
+    list = JSON.parse(await env.SOLPA_GANTT_KV.get(listKey) || "[]");
+  } catch {
+    list = [];
   }
+  if (!Array.isArray(list)) list = [];
+  list.push({ id: attachmentId, name: filename, type: contentType, size: file.size, at: Date.now() });
+  await env.SOLPA_GANTT_KV.put(listKey, JSON.stringify(list.slice(-50)));
 
-  const isImage = /^image\/(png|jpe?g|gif|webp|heic|svg\+xml)$/i.test(contentType);
-  const block = isImage
-    ? { object: "block", type: "image", image: { type: "file_upload", file_upload: { id: upload.id } } }
-    : { object: "block", type: "file", file: { type: "file_upload", file_upload: { id: upload.id }, name: filename } };
+  return { ok: true, filename, id: attachmentId };
+}
 
-  await notionRequest(env, `/v1/blocks/${encodeURIComponent(pageId)}/children`, {
-    method: "PATCH",
-    body: JSON.stringify({ children: [block] }),
+async function serveAttachment(env, attachmentId) {
+  if (!env.SOLPA_GANTT_KV) throw httpError(500, "KV 바인딩이 없습니다.");
+  const { value, metadata } = await env.SOLPA_GANTT_KV.getWithMetadata(`solpa:gantt:attachment:${attachmentId}`, "arrayBuffer");
+  if (!value) throw httpError(404, "첨부 파일을 찾을 수 없습니다.");
+  const name = String(metadata?.name || "attachment");
+  return new Response(value, {
+    headers: {
+      "Content-Type": String(metadata?.type || "application/octet-stream"),
+      "Content-Disposition": `inline; filename*=UTF-8''${encodeURIComponent(name)}`,
+      "Cache-Control": "private, max-age=3600",
+    },
   });
-
-  return { ok: true, filename };
 }
 
 async function collectNotionBlockContent(env, blockId, depth, context) {
