@@ -5268,7 +5268,7 @@ function openRowContext(event, row, date = "") {
   render();
   showContextMenu(event.clientX, event.clientY, {
     summary: contextSummary(state.context) || state.context.summary || row.title,
-    canCreate: !useSelection && !row.hiddenOnly && (Boolean(date) || ["channel", "project"].includes(row.kind)),
+    canCreate: !useSelection && (Boolean(date) || ["channel", "project"].includes(row.kind)) && (!row.hiddenOnly || row.kind === "channel"),
     canEdit: !useSelection && !row.hiddenOnly && ((row.kind === "task" && taskIds.length === 1) || ["channel", "project"].includes(row.kind)),
     canRename: !useSelection && taskIds.length > 0 && ["channel", "project"].includes(row.kind) && !row.hiddenOnly,
     canMerge: canMergeContextProjects(useSelection ? "selection" : row.kind, taskIds),
