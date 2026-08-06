@@ -184,6 +184,7 @@ const state = {
   impactResolve: null,
   inputResolve: null,
   inputFieldsSchema: [],
+  inputOnFieldChange: null,
   viewSettingsLoaded: false,
   viewSettingsUpdatedAt: "",
   viewSettingsSaveTimer: null,
@@ -5426,8 +5427,9 @@ async function createTaskFromContext() {
   }
   const copy = contextCreateModalCopy(context);
   await createTaskFromSeed(contextTaskSeed(context), {
-    title: copy.title,
-    summary: copy.summary,
+    ...copy,
+    lockChannel: true,
+    lockProject: true,
   });
 }
 
@@ -5452,7 +5454,7 @@ function contextCreateModalCopy(context) {
 
 async function createProjectFromContext(context) {
   const seed = contextProjectSeed(context);
-  const input = await openCreateProjectModal(seed);
+  const input = await openCreateProjectModal(seed, { lockChannel: true });
   if (!input) return;
   await createProject(input);
 }
@@ -5479,7 +5481,7 @@ function contextTaskSeed(context) {
     project,
     detail: "상세일정",
     start,
-    end: shiftDate(start, 1),
+    end: "",
     status: "시작 전",
     assignee: sourceTask?.assignee || "",
     color: sourceTask?.color || PALETTE[Math.floor(Math.random() * PALETTE.length)],
@@ -5513,6 +5515,34 @@ function canMergeContextProjects(kind, taskIds) {
   const groups = projectGroupsForTaskIds(taskIds);
   if (kind === "project") return groups.length === 1;
   return groups.length > 1 && new Set(groups.map((group) => normalizeChannelName(group.channel))).size === 1;
+}
+
+function liveChannelOptions() {
+  const seen = new Set();
+  const options = [];
+  state.rows
+    .filter((row) => row.kind === "channel" && !row.hiddenOnly)
+    .forEach((row) => {
+      const name = String(row.title || "").trim();
+      if (!name || seen.has(name)) return;
+      seen.add(name);
+      options.push({ value: name, label: name });
+    });
+  return options;
+}
+
+function liveProjectPickerOptions(channel) {
+  const seen = new Set();
+  const options = [];
+  state.rows
+    .filter((row) => row.kind === "project" && !row.hiddenOnly && sameChannelName(row.channel, channel))
+    .forEach((row) => {
+      const name = String(row.title || "").trim();
+      if (!name || seen.has(name)) return;
+      seen.add(name);
+      options.push({ value: name, label: name });
+    });
+  return options;
 }
 
 function liveProjectMergeOptions(channel, mergeNames = [], options = {}) {
@@ -6572,11 +6602,12 @@ function resolveImpactPreview(confirmed, silent = false) {
   if (!silent && resolve) resolve(Boolean(confirmed));
 }
 
-function openInputModal({ title, summary, fields, confirmText = "저장", badge = "입력" }) {
+function openInputModal({ title, summary, fields, confirmText = "저장", badge = "입력", onFieldChange }) {
   return new Promise((resolve) => {
     resolveInputModal(null, true);
     state.inputResolve = resolve;
     state.inputFieldsSchema = fields || [];
+    state.inputOnFieldChange = typeof onFieldChange === "function" ? onFieldChange : null;
     els.inputBadge.textContent = badge;
     els.inputTitle.textContent = title || "값 입력";
     els.inputSummary.textContent = summary || "변경할 값을 입력하세요.";
@@ -6584,6 +6615,8 @@ function openInputModal({ title, summary, fields, confirmText = "저장", badge 
     els.inputFields.innerHTML = state.inputFieldsSchema.map(inputFieldMarkup).join("");
     bindInputModalPresetButtons();
     bindInputModalChoiceFields();
+    bindInputModalSelectFields();
+    bindInputModalFieldChanges();
     els.inputModalBackdrop.hidden = false;
     els.inputModal.hidden = false;
     window.requestAnimationFrame(() => {
@@ -6603,6 +6636,16 @@ function inputFieldMarkup(field, index) {
   const inputId = `inputModalField${index}`;
   const type = field.type || "text";
 
+  if (field.locked) {
+    return `
+      <div class="input-field" data-input-field-name="${escapeHtml(name)}">
+        <span>${escapeHtml(label)}</span>
+        <div class="input-locked-value">${escapeHtml(value)}</div>
+        <input id="${inputId}" data-input-name="${escapeHtml(name)}" type="hidden" value="${escapeHtml(value)}" />
+      </div>
+    `;
+  }
+
   if (type === "choice") {
     const options = normalizeInputOptions(field.options || []);
     const hasSelectedOption = options.some((option) => option.value === value);
@@ -6612,7 +6655,7 @@ function inputFieldMarkup(field, index) {
       ? ` placeholder="${escapeHtml(field.customPlaceholder)}"`
       : "";
     return `
-      <div class="input-field" data-input-choice-name="${escapeHtml(name)}" role="group" aria-labelledby="${inputId}Label">
+      <div class="input-field" data-input-field-name="${escapeHtml(name)}" data-input-choice-name="${escapeHtml(name)}" role="group" aria-labelledby="${inputId}Label">
         <span id="${inputId}Label">${escapeHtml(label)}</span>
         <input id="${inputId}" data-input-name="${escapeHtml(name)}" type="hidden" value="${escapeHtml(value)}" />
         <div class="input-choice-list">
@@ -6635,7 +6678,7 @@ function inputFieldMarkup(field, index) {
   if (type === "color") {
     const options = normalizeInputOptions(field.options || PALETTE);
     return `
-      <label class="input-field" for="${inputId}">
+      <label class="input-field" data-input-field-name="${escapeHtml(name)}" for="${inputId}">
         <span>${escapeHtml(label)}</span>
         <select id="${inputId}" data-input-name="${escapeHtml(name)}"${required}>
           ${options.map((option) => `<option value="${escapeHtml(option.value)}"${option.value === value ? " selected" : ""}>${escapeHtml(option.label)}</option>`).join("")}
@@ -6646,8 +6689,27 @@ function inputFieldMarkup(field, index) {
 
   if (type === "select") {
     const options = normalizeInputOptions(field.options || []);
+    const hasSelectedOption = options.some((option) => option.value === value);
+    const allowCustom = Boolean(field.allowCustom);
+    if (allowCustom) {
+      const customValue = hasSelectedOption ? "" : value;
+      const customPlaceholder = field.customPlaceholder
+        ? ` placeholder="${escapeHtml(field.customPlaceholder)}"`
+        : "";
+      return `
+        <div class="input-field" data-input-field-name="${escapeHtml(name)}" data-input-select-name="${escapeHtml(name)}" role="group" aria-labelledby="${inputId}Label">
+          <span id="${inputId}Label">${escapeHtml(label)}</span>
+          <input id="${inputId}" data-input-name="${escapeHtml(name)}" type="hidden" value="${escapeHtml(value)}" />
+          <select data-input-select-control aria-labelledby="${inputId}Label"${required}>
+            ${options.map((option) => `<option value="${escapeHtml(option.value)}"${option.value === value ? " selected" : ""}>${escapeHtml(option.label)}</option>`).join("")}
+            <option value="__custom__"${hasSelectedOption ? "" : " selected"}>직접 입력</option>
+          </select>
+          <input class="input-select-custom" data-input-select-custom type="text" value="${escapeHtml(customValue)}"${customPlaceholder} aria-label="${escapeHtml(label)} 직접 입력"${hasSelectedOption ? " hidden" : ""} />
+        </div>
+      `;
+    }
     return `
-      <label class="input-field" for="${inputId}">
+      <label class="input-field" data-input-field-name="${escapeHtml(name)}" for="${inputId}">
         <span>${escapeHtml(label)}</span>
         <select id="${inputId}" data-input-name="${escapeHtml(name)}"${required}>
           ${options.map((option) => `<option value="${escapeHtml(option.value)}"${option.value === value ? " selected" : ""}>${escapeHtml(option.label)}</option>`).join("")}
@@ -6658,7 +6720,7 @@ function inputFieldMarkup(field, index) {
 
   if (type === "textarea") {
     return `
-      <label class="input-field" for="${inputId}">
+      <label class="input-field" data-input-field-name="${escapeHtml(name)}" for="${inputId}">
         <span>${escapeHtml(label)}</span>
         <textarea id="${inputId}" data-input-name="${escapeHtml(name)}"${placeholder}${required}>${escapeHtml(value)}</textarea>
       </label>
@@ -6666,7 +6728,7 @@ function inputFieldMarkup(field, index) {
   }
 
   return `
-    <label class="input-field" for="${inputId}">
+    <label class="input-field" data-input-field-name="${escapeHtml(name)}" for="${inputId}">
       <span>${escapeHtml(label)}</span>
       <input id="${inputId}" data-input-name="${escapeHtml(name)}" type="${escapeHtml(inputTypeForField(type))}" value="${escapeHtml(value)}"${placeholder}${required} />
       ${inputPresetMarkup(field, name)}
@@ -6709,32 +6771,151 @@ function bindInputModalPresetButtons() {
 
 function bindInputModalChoiceFields() {
   els.inputFields.querySelectorAll("[data-input-choice-name]").forEach((field) => {
-    const control = modalInputControl(field.dataset.inputChoiceName || "");
-    if (!control) return;
-    const buttons = [...field.querySelectorAll(".input-choice-option")];
-    const customInput = field.querySelector("[data-input-choice-custom]");
+    bindInputModalChoiceField(field);
+  });
+}
 
-    buttons.forEach((button) => {
-      button.addEventListener("click", () => {
-        control.value = button.dataset.inputChoiceValue || "";
-        buttons.forEach((option) => {
-          const selected = option === button;
-          option.classList.toggle("is-selected", selected);
-          option.setAttribute("aria-pressed", String(selected));
-        });
-        if (customInput) customInput.value = "";
-      });
-    });
+function bindInputModalChoiceField(field) {
+  const name = field.dataset.inputChoiceName || "";
+  const control = modalInputControl(name);
+  if (!control) return;
+  const buttons = [...field.querySelectorAll(".input-choice-option")];
+  const customInput = field.querySelector("[data-input-choice-custom]");
 
-    customInput?.addEventListener("input", () => {
-      control.value = customInput.value;
-      if (!customInput.value) return;
+  buttons.forEach((button) => {
+    button.addEventListener("click", () => {
+      control.value = button.dataset.inputChoiceValue || "";
       buttons.forEach((option) => {
-        option.classList.remove("is-selected");
-        option.setAttribute("aria-pressed", "false");
+        const selected = option === button;
+        option.classList.toggle("is-selected", selected);
+        option.setAttribute("aria-pressed", String(selected));
       });
+      if (customInput) customInput.value = "";
+      notifyInputModalFieldChange(name, control.value);
     });
   });
+
+  customInput?.addEventListener("input", () => {
+    control.value = customInput.value;
+    buttons.forEach((option) => {
+      option.classList.remove("is-selected");
+      option.setAttribute("aria-pressed", "false");
+    });
+    notifyInputModalFieldChange(name, control.value);
+  });
+}
+
+function bindInputModalSelectFields() {
+  els.inputFields.querySelectorAll("[data-input-select-name]").forEach((field) => {
+    const name = field.dataset.inputSelectName || "";
+    const control = modalInputControl(name);
+    const select = field.querySelector("[data-input-select-control]");
+    const customInput = field.querySelector("[data-input-select-custom]");
+    if (!control || !select || !customInput) return;
+
+    select.addEventListener("change", () => {
+      const isCustom = select.value === "__custom__";
+      customInput.hidden = !isCustom;
+      if (!isCustom) customInput.value = "";
+      control.value = isCustom ? customInput.value : select.value;
+      notifyInputModalFieldChange(name, control.value);
+      if (isCustom) window.requestAnimationFrame(() => customInput.focus());
+    });
+
+    customInput.addEventListener("input", () => {
+      control.value = customInput.value;
+      notifyInputModalFieldChange(name, control.value);
+    });
+  });
+}
+
+function bindInputModalFieldChanges() {
+  els.inputFields.querySelectorAll("[data-input-name]").forEach((control) => {
+    if (control.type === "hidden") return;
+    const eventName = control.tagName === "SELECT" ? "change" : "input";
+    control.addEventListener(eventName, () => {
+      notifyInputModalFieldChange(control.dataset.inputName || "", control.value);
+    });
+  });
+}
+
+function notifyInputModalFieldChange(name, value) {
+  state.inputOnFieldChange?.(name, String(value ?? ""), {
+    setChoiceOptions: setInputModalChoiceOptions,
+    getValue: getInputModalValue,
+    setValue: setInputModalValue,
+  });
+}
+
+function setInputModalChoiceOptions(fieldName, options) {
+  const index = state.inputFieldsSchema.findIndex((field) => field.name === fieldName);
+  const schema = state.inputFieldsSchema[index];
+  if (index < 0 || schema?.locked || schema?.type !== "choice") return;
+
+  const currentValue = getInputModalValue(fieldName);
+  const normalizedOptions = normalizeInputOptions(options || []);
+  const nextValue = normalizedOptions.some((option) => option.value === currentValue) ? currentValue : "";
+  const nextSchema = { ...schema, options: normalizedOptions, value: nextValue };
+  state.inputFieldsSchema[index] = nextSchema;
+
+  const currentField = inputModalFieldElement(fieldName);
+  if (!currentField) return;
+  currentField.outerHTML = inputFieldMarkup(nextSchema, index);
+  const nextField = inputModalFieldElement(fieldName);
+  if (nextField) bindInputModalChoiceField(nextField);
+}
+
+function getInputModalValue(fieldName) {
+  return String(modalInputControl(fieldName)?.value ?? "");
+}
+
+function setInputModalValue(fieldName, value) {
+  const nextValue = String(value ?? "");
+  const schema = state.inputFieldsSchema.find((field) => field.name === fieldName);
+  const field = inputModalFieldElement(fieldName);
+  const control = modalInputControl(fieldName);
+  if (!schema || !field || !control) return;
+  schema.value = nextValue;
+
+  if (schema.locked) {
+    control.value = nextValue;
+    const lockedValue = field.querySelector(".input-locked-value");
+    if (lockedValue) lockedValue.textContent = nextValue;
+    return;
+  }
+
+  if (schema.type === "choice") {
+    const buttons = [...field.querySelectorAll(".input-choice-option")];
+    const selectedButton = buttons.find((button) => button.dataset.inputChoiceValue === nextValue);
+    buttons.forEach((button) => {
+      const selected = button === selectedButton;
+      button.classList.toggle("is-selected", selected);
+      button.setAttribute("aria-pressed", String(selected));
+    });
+    const customInput = field.querySelector("[data-input-choice-custom]");
+    if (customInput) customInput.value = selectedButton ? "" : nextValue;
+    control.value = nextValue;
+    return;
+  }
+
+  if (schema.type === "select" && schema.allowCustom) {
+    const select = field.querySelector("[data-input-select-control]");
+    const customInput = field.querySelector("[data-input-select-custom]");
+    if (!select || !customInput) return;
+    const hasOption = [...select.options].some((option) => option.value !== "__custom__" && option.value === nextValue);
+    select.value = hasOption ? nextValue : "__custom__";
+    customInput.hidden = hasOption;
+    customInput.value = hasOption ? "" : nextValue;
+    control.value = nextValue;
+    return;
+  }
+
+  control.value = nextValue;
+}
+
+function inputModalFieldElement(name) {
+  return [...els.inputFields.querySelectorAll("[data-input-field-name]")]
+    .find((field) => field.dataset.inputFieldName === name) || null;
 }
 
 function modalInputControl(name) {
@@ -6773,8 +6954,8 @@ function submitInputModal() {
     const schema = state.inputFieldsSchema.find((field) => field.name === name) || {};
     if (schema.required !== false && !value) {
       showToast(`${schema.label || "값"}을 입력하세요.`);
-      const choiceField = control.closest("[data-input-choice-name]");
-      (choiceField?.querySelector(".input-choice-custom, .input-choice-option") || control).focus();
+      const compositeField = control.closest("[data-input-choice-name], [data-input-select-name]");
+      (compositeField?.querySelector(".input-choice-custom, .input-select-custom:not([hidden]), .input-choice-option, select") || control).focus();
       return;
     }
     values[name] = value;
@@ -6786,6 +6967,7 @@ function resolveInputModal(values, silent = false) {
   const resolve = state.inputResolve;
   state.inputResolve = null;
   state.inputFieldsSchema = [];
+  state.inputOnFieldChange = null;
   els.inputModalBackdrop.hidden = true;
   els.inputModal.hidden = true;
   els.inputFields.innerHTML = "";
@@ -11869,7 +12051,7 @@ async function newTask() {
     project: selected?.project || "새 프로젝트",
     start: todayString(),
     detail,
-    end: shiftDate(todayString(), 3),
+    end: "",
     status: "시작 전",
     assignee: "",
     color: selected?.color || colorForDetail(detail, PALETTE[0]),
@@ -11885,7 +12067,7 @@ async function createTaskFromSeed(seed, copy = {}) {
   await createTask(input);
 }
 
-async function openCreateProjectModal(seed) {
+async function openCreateProjectModal(seed, options = {}) {
   const start = seed.start || todayString();
   const end = compareDate(seed.end || start, start) < 0 ? start : seed.end || start;
   const input = await openInputModal({
@@ -11894,7 +12076,7 @@ async function openCreateProjectModal(seed) {
     badge: "프로젝트",
     confirmText: "프로젝트 생성",
     fields: [
-      { name: "channel", label: "채널", value: seed.channel || "", placeholder: "채널명" },
+      { name: "channel", label: "채널", value: seed.channel || "", placeholder: "채널명", locked: Boolean(options.lockChannel) },
       { name: "project", label: "프로젝트", value: seed.project || "", placeholder: "프로젝트명" },
       { name: "description", label: "내용", value: seed.description || "", type: "textarea", required: false, placeholder: "프로젝트 메모" },
       { name: "start", label: "시작", value: start, type: "date" },
@@ -11921,20 +12103,47 @@ async function openCreateProjectModal(seed) {
 
 async function openCreateTaskModal(seed, copy = {}) {
   const start = seed.start || todayString();
-  const end = compareDate(seed.end || start, start) < 0 ? start : seed.end || start;
+  const end = seed.end && compareDate(seed.end, start) < 0 ? start : seed.end || "";
+  const channelOptions = liveChannelOptions();
+  const projectOptions = liveProjectPickerOptions(seed.channel || "");
   const input = await openInputModal({
     title: copy.title || "새 일정 만들기",
     summary: copy.summary || "02 제작 간트에 새 일정을 만듭니다. 채널팀 플랜 원본은 건드리지 않습니다.",
     badge: "생성",
     confirmText: "생성 확인",
     fields: [
-      { name: "channel", label: "채널", value: seed.channel || "", placeholder: "채널명" },
-      { name: "project", label: "프로젝트", value: seed.project || "", placeholder: "프로젝트명" },
-      { name: "detail", label: "상세일정", value: seed.detail || "상세일정", placeholder: "촬영, 편집, 업로드 등" },
-      { name: "title", label: "노션 제목", value: seed.title || seed.project || "", placeholder: "02 제작 간트에 저장될 제목" },
+      {
+        name: "channel",
+        label: "채널",
+        type: "choice",
+        value: seed.channel || "",
+        options: channelOptions,
+        allowCustom: true,
+        customPlaceholder: "신규 채널 이름",
+        locked: Boolean(copy.lockChannel),
+      },
+      {
+        name: "project",
+        label: "프로젝트",
+        type: "choice",
+        value: seed.project || "",
+        options: projectOptions,
+        allowCustom: true,
+        customPlaceholder: "신규 프로젝트 이름",
+        locked: Boolean(copy.lockProject),
+      },
+      {
+        name: "detail",
+        label: "상세일정",
+        type: "select",
+        value: seed.detail || "",
+        options: DETAIL_PRESETS.map(({ value, label }) => ({ value, label })),
+        allowCustom: true,
+        customPlaceholder: "상세일정 이름",
+      },
       { name: "description", label: "내용", value: seed.description || "", type: "textarea", required: false, placeholder: "메모" },
       { name: "start", label: "시작", value: start, type: "date" },
-      { name: "end", label: "종료", value: end, type: "date" },
+      { name: "end", label: "종료 (비우면 하루)", value: end, type: "date", required: false },
       { name: "status", label: "상태", value: seed.status || "시작 전", placeholder: "시작 전" },
       { name: "assignee", label: "담당", value: seed.assignee || "", required: false, placeholder: "담당자" },
       {
@@ -11945,14 +12154,21 @@ async function openCreateTaskModal(seed, copy = {}) {
         options: colorInputOptions(),
       },
     ],
+    onFieldChange(name, value, helpers) {
+      if (name !== "channel" || copy.lockChannel || copy.lockProject) return;
+      const isLiveChannel = channelOptions.some((option) => option.value === value);
+      helpers.setChoiceOptions("project", isLiveChannel ? liveProjectPickerOptions(value) : []);
+    },
   });
   if (!input) return null;
   const normalizedStart = input.start || start;
   const normalizedEnd = compareDate(input.end || normalizedStart, normalizedStart) < 0 ? normalizedStart : input.end || normalizedStart;
+  const channel = input.channel || "새 채널";
+  const project = input.project || "새 프로젝트";
   return {
-    title: input.title || input.project || input.detail || "새 상세일정",
-    channel: input.channel || "새 채널",
-    project: input.project || "새 프로젝트",
+    title: composeTaskTitle(channel, project),
+    channel,
+    project,
     detail: input.detail || "상세일정",
     description: input.description || "",
     start: normalizedStart,
@@ -11961,6 +12177,12 @@ async function openCreateTaskModal(seed, copy = {}) {
     assignee: input.assignee || "",
     color: input.color || seed.color || colorForDetail(input.detail || seed.detail, PALETTE[0]),
   };
+}
+
+function composeTaskTitle(channel, project) {
+  const normalizedChannel = String(channel || "").trim();
+  const normalizedProject = String(project || "").trim();
+  return normalizedProject.startsWith("[") ? normalizedProject : `[${normalizedChannel}] ${normalizedProject}`;
 }
 
 async function createProject(seed) {
