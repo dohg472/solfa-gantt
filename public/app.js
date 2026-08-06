@@ -1471,15 +1471,8 @@ function render() {
 }
 
 function handleGanttScroll() {
-  const nextScrollLeft = Math.round(els.ganttScroll.scrollLeft || 0);
+  state.renderedScrollLeft = Math.round(els.ganttScroll.scrollLeft || 0);
   updateTimelineNavigatorWindow();
-  if (nextScrollLeft === state.renderedScrollLeft || state.ganttScrollFrame) return;
-  state.ganttScrollFrame = window.requestAnimationFrame(() => {
-    state.ganttScrollFrame = null;
-    if (Math.round(els.ganttScroll.scrollLeft || 0) === state.renderedScrollLeft) return;
-    if (state.isLoading || state.drag || state.selectionDrag || state.createDrag || state.tableResizeDrag || state.timelineNavigatorDrag || state.panDrag) return;
-    render();
-  });
 }
 
 function renderTimelineNavigator(timelineWidth) {
@@ -4932,20 +4925,14 @@ function signedDays(value) {
 function visibleBarRect(rawLeft, rawWidth, kind) {
   const minWidth = kind === "task" ? 18 : 28;
   const timelineWidth = timelinePixelWidth();
-  const stickyLeft = visibleTimelineLeft();
   const rawRight = rawLeft + rawWidth;
-  const clippedStart = rawLeft < stickyLeft || rawLeft < 0;
+  const clippedStart = rawLeft < 0;
   const clippedEnd = rawRight > timelineWidth;
-  const left = Math.max(stickyLeft, 0, rawLeft);
+  const left = Math.max(0, rawLeft);
   const right = Math.min(timelineWidth, rawRight);
   const width = Math.max(right - left, clippedStart || clippedEnd ? minWidth : 0);
-  if (rawRight < stickyLeft || right < 0 || left > timelineWidth) return { left: rawLeft, width: 0, clippedStart, clippedEnd };
+  if (right < 0 || left > timelineWidth) return { left: rawLeft, width: 0, clippedStart, clippedEnd };
   return { left, width, clippedStart, clippedEnd };
-}
-
-function visibleTimelineLeft() {
-  const scrollLeft = Number(els.ganttScroll?.scrollLeft || 0);
-  return Number.isFinite(scrollLeft) ? Math.max(0, scrollLeft) : 0;
 }
 
 function timelinePixelWidth() {
