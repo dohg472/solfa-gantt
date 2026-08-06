@@ -12171,9 +12171,9 @@ async function newTask() {
   const selected = selectedTask();
   const detail = selected?.detail || "촬영";
   await createTaskFromSeed({
-    title: selected?.title || "새 상세일정",
-    channel: selected?.channel || "새 채널",
-    project: selected?.project || "새 프로젝트",
+    title: selected?.title || "",
+    channel: selected?.channel || "",
+    project: selected?.project || "",
     start: todayString(),
     detail,
     end: "",
