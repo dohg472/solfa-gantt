@@ -2758,8 +2758,16 @@ function similarProjectCandidate(left, right) {
   const lengthRatio = Math.min(leftKey.length, rightKey.length) / Math.max(leftKey.length, rightKey.length);
   const containment = hasStrongProjectContainment(leftKey, rightKey);
   const tokenContainment = sharesDistinctiveTokenContainment(left.project, right.project);
+  const sharedTokens = sharedDistinctiveTokens(left.project, right.project, 3);
+  const sharedTokenMatch = sharedTokens.length > 0;
   const bigram = sharedBigramScore(leftKey, rightKey);
-  const splitSignal = splitScheduleSimilaritySignal(left, right, leftKey, rightKey, { bigram, containment, tokenContainment, lengthRatio });
+  const splitSignal = splitScheduleSimilaritySignal(left, right, leftKey, rightKey, {
+    bigram,
+    containment,
+    tokenContainment,
+    sharedTokenMatch,
+    lengthRatio,
+  });
   const score = splitSignal?.score ?? (containment ? Math.max(0.82, lengthRatio) : bigram);
   if (!splitSignal && !containment && bigram < 0.72) return null;
   if (score < 0.55) return null;
@@ -2804,18 +2812,19 @@ function splitScheduleSimilaritySignal(left, right, leftKey, rightKey, metrics =
   const bigram = Number(metrics.bigram || 0);
   const containment = Boolean(metrics.containment);
   const tokenContainment = Boolean(metrics.tokenContainment);
+  const sharedTokenMatch = Boolean(metrics.sharedTokenMatch);
   const episodeMatch = sharesEpisodeIdentity(leftKey, rightKey) || canMergeByEpisodeTitle(leftKey, rightKey);
   const anchorMatch = hasSharedProjectAnchor(leftKey, rightKey);
-  const relaxedNameMatch = containment || tokenContainment || episodeMatch || anchorMatch || bigram >= 0.58;
+  const relaxedNameMatch = containment || tokenContainment || sharedTokenMatch || episodeMatch || anchorMatch || bigram >= 0.58;
   if (!relaxedNameMatch) return null;
 
   const score = Math.max(
     containment || tokenContainment ? Math.max(0.82, Number(metrics.lengthRatio || 0)) : 0,
-    episodeMatch ? 0.76 : 0,
+    episodeMatch || sharedTokenMatch ? 0.76 : 0,
     anchorMatch ? 0.66 : 0,
     bigram,
   );
-  const confidence = score >= 0.72 ? "high" : "medium";
+  const confidence = score >= 0.82 ? "high" : "medium";
   const reason = `촬영/편집 뒤 업로드 후보 · 간격 ${gapDays}일 · 유사도 ${Math.round(score * 100)}%`;
   return { score, confidence, gapDays, reason };
 }
@@ -3151,6 +3160,16 @@ function sharesDistinctiveTokenContainment(nameA, nameB) {
     if (!larger.has(token)) return false;
   }
   return true;
+}
+
+function sharedDistinctiveTokens(nameA, nameB, minLength = 2) {
+  const tokensA = distinctiveProjectTokens(nameA);
+  const tokensB = distinctiveProjectTokens(nameB);
+  const shared = [];
+  for (const token of tokensA) {
+    if (token.length >= minLength && tokensB.has(token)) shared.push(token);
+  }
+  return shared;
 }
 
 function sharesEmbeddedKoreanName(a, b) {
@@ -5496,20 +5515,46 @@ function canMergeContextProjects(kind, taskIds) {
   return groups.length > 1 && new Set(groups.map((group) => normalizeChannelName(group.channel))).size === 1;
 }
 
-function liveProjectMergeOptions(channel, mergeNames = []) {
+function liveProjectMergeOptions(channel, mergeNames = [], options = {}) {
   const seen = new Set();
-  const options = [];
-  const push = (name, meta) => {
+  const excludeNames = new Set(
+    (Array.isArray(options.excludeNames) ? options.excludeNames : [])
+      .map((name) => String(name || "").trim())
+      .filter(Boolean),
+  );
+  const similarityBase = String(options.similarityBase || "").trim();
+  const entries = [];
+  const push = (name, meta, isMergeTarget = false) => {
     const trimmed = String(name || "").trim();
-    if (!trimmed || seen.has(trimmed)) return;
+    if (!trimmed || excludeNames.has(trimmed) || seen.has(trimmed)) return;
     seen.add(trimmed);
-    options.push({ value: trimmed, label: trimmed, meta });
+    const sharedTokens = similarityBase ? sharedDistinctiveTokens(similarityBase, trimmed) : [];
+    const similarityScore = sharedTokens.reduce((total, token) => total + token.length, 0);
+    entries.push({
+      value: trimmed,
+      label: trimmed,
+      meta: !isMergeTarget && sharedTokens.length ? "추천" : meta,
+      isMergeTarget,
+      similarityScore,
+      order: entries.length,
+    });
   };
-  mergeNames.forEach((name) => push(name, "병합 대상"));
+  mergeNames.forEach((name) => push(name, "병합 대상", true));
   state.rows
     .filter((row) => row.kind === "project" && !row.hiddenOnly && sameChannelName(row.channel, channel))
     .forEach((row) => push(row.title, ""));
-  return options;
+  return entries
+    .sort((a, b) => {
+      if (a.isMergeTarget !== b.isMergeTarget) return a.isMergeTarget ? -1 : 1;
+      const aRecommended = !a.isMergeTarget && a.similarityScore > 0;
+      const bRecommended = !b.isMergeTarget && b.similarityScore > 0;
+      if (aRecommended !== bRecommended) return aRecommended ? -1 : 1;
+      if (aRecommended && bRecommended && a.similarityScore !== b.similarityScore) {
+        return b.similarityScore - a.similarityScore;
+      }
+      return a.order - b.order;
+    })
+    .map(({ value, label, meta }) => ({ value, label, meta }));
 }
 
 async function mergeContextProjects() {
@@ -5530,7 +5575,9 @@ async function mergeContextProjects() {
   }
 
   const channel = groups[0].channel;
-  const defaultTarget = context.kind === "project" ? context.title : groups[0].project;
+  const isSingleProject = groups.length === 1;
+  const defaultTarget = isSingleProject ? "" : (context.kind === "project" ? context.title : groups[0].project);
+  const similarityBase = isSingleProject ? groups[0].project : defaultTarget;
   hideContextMenu();
   const input = await openInputModal({
     title: "프로젝트 병합",
@@ -5538,7 +5585,19 @@ async function mergeContextProjects() {
     badge: "병합",
     confirmText: "병합 확인",
     fields: [
-      { name: "target", label: "기준 프로젝트명", type: "choice", value: defaultTarget, options: liveProjectMergeOptions(channel, groups.map((g) => g.project)), allowCustom: true, customPlaceholder: "직접 입력" },
+      {
+        name: "target",
+        label: "기준 프로젝트명",
+        type: "choice",
+        value: defaultTarget,
+        options: liveProjectMergeOptions(channel, isSingleProject ? [] : groups.map((g) => g.project), {
+          excludeNames: isSingleProject ? [groups[0].project] : [],
+          similarityBase,
+        }),
+        allowCustom: true,
+        customPlaceholder: "직접 입력",
+        required: !isSingleProject,
+      },
     ],
   });
   const target = input?.target?.trim();
@@ -11233,7 +11292,7 @@ async function mergeReviewGroup(key) {
     badge: "검토 병합",
     confirmText: "병합 확인",
     fields: [
-      { name: "target", label: "기준 프로젝트명", type: "choice", value: defaultTarget, options: liveProjectMergeOptions(group.channel, mergeInfo.projects), allowCustom: true, customPlaceholder: "직접 입력" },
+      { name: "target", label: "기준 프로젝트명", type: "choice", value: defaultTarget, options: liveProjectMergeOptions(group.channel, mergeInfo.projects, { similarityBase: defaultTarget }), allowCustom: true, customPlaceholder: "직접 입력" },
     ],
   });
   const target = input?.target?.trim();
