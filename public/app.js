@@ -5496,6 +5496,22 @@ function canMergeContextProjects(kind, taskIds) {
   return groups.length > 1 && new Set(groups.map((group) => normalizeChannelName(group.channel))).size === 1;
 }
 
+function liveProjectMergeOptions(channel, mergeNames = []) {
+  const seen = new Set();
+  const options = [];
+  const push = (name, meta) => {
+    const trimmed = String(name || "").trim();
+    if (!trimmed || seen.has(trimmed)) return;
+    seen.add(trimmed);
+    options.push({ value: trimmed, label: trimmed, meta });
+  };
+  mergeNames.forEach((name) => push(name, "병합 대상"));
+  state.rows
+    .filter((row) => row.kind === "project" && !row.hiddenOnly && sameChannelName(row.channel, channel))
+    .forEach((row) => push(row.title, ""));
+  return options;
+}
+
 async function mergeContextProjects() {
   const context = state.context;
   if (!context?.taskIds?.length) return;
@@ -5522,7 +5538,7 @@ async function mergeContextProjects() {
     badge: "병합",
     confirmText: "병합 확인",
     fields: [
-      { name: "target", label: "기준 프로젝트명", value: defaultTarget, placeholder: "프로젝트명" },
+      { name: "target", label: "기준 프로젝트명", type: "choice", value: defaultTarget, options: liveProjectMergeOptions(channel, groups.map((g) => g.project)), allowCustom: true, customPlaceholder: "직접 입력" },
     ],
   });
   const target = input?.target?.trim();
@@ -6508,10 +6524,11 @@ function openInputModal({ title, summary, fields, confirmText = "저장", badge 
     els.inputConfirmButton.textContent = confirmText;
     els.inputFields.innerHTML = state.inputFieldsSchema.map(inputFieldMarkup).join("");
     bindInputModalPresetButtons();
+    bindInputModalChoiceFields();
     els.inputModalBackdrop.hidden = false;
     els.inputModal.hidden = false;
     window.requestAnimationFrame(() => {
-      const focusTarget = els.inputFields.querySelector("input, select, textarea");
+      const focusTarget = els.inputFields.querySelector('input:not([type="hidden"]), select, textarea, .input-choice-option');
       focusTarget?.focus();
       if (focusTarget?.select) focusTarget.select();
     });
@@ -6526,6 +6543,35 @@ function inputFieldMarkup(field, index) {
   const required = field.required === false ? "" : " required";
   const inputId = `inputModalField${index}`;
   const type = field.type || "text";
+
+  if (type === "choice") {
+    const options = normalizeInputOptions(field.options || []);
+    const hasSelectedOption = options.some((option) => option.value === value);
+    const allowCustom = Boolean(field.allowCustom);
+    const customValue = allowCustom && !hasSelectedOption ? value : "";
+    const customPlaceholder = field.customPlaceholder
+      ? ` placeholder="${escapeHtml(field.customPlaceholder)}"`
+      : "";
+    return `
+      <div class="input-field" data-input-choice-name="${escapeHtml(name)}" role="group" aria-labelledby="${inputId}Label">
+        <span id="${inputId}Label">${escapeHtml(label)}</span>
+        <input id="${inputId}" data-input-name="${escapeHtml(name)}" type="hidden" value="${escapeHtml(value)}" />
+        <div class="input-choice-list">
+          ${options.map((option) => `
+            <button
+              class="input-choice-option${option.value === value ? " is-selected" : ""}"
+              type="button"
+              data-input-choice-value="${escapeHtml(option.value)}"
+              aria-pressed="${option.value === value ? "true" : "false"}">
+              ${escapeHtml(option.label)}
+              ${option.meta ? `<span class="input-choice-meta">${escapeHtml(option.meta)}</span>` : ""}
+            </button>
+          `).join("")}
+        </div>
+        ${allowCustom ? `<input class="input-choice-custom" data-input-choice-custom type="text" value="${escapeHtml(customValue)}"${customPlaceholder} aria-label="${escapeHtml(label)} 직접 입력" />` : ""}
+      </div>
+    `;
+  }
 
   if (type === "color") {
     const options = normalizeInputOptions(field.options || PALETTE);
@@ -6602,6 +6648,36 @@ function bindInputModalPresetButtons() {
   });
 }
 
+function bindInputModalChoiceFields() {
+  els.inputFields.querySelectorAll("[data-input-choice-name]").forEach((field) => {
+    const control = modalInputControl(field.dataset.inputChoiceName || "");
+    if (!control) return;
+    const buttons = [...field.querySelectorAll(".input-choice-option")];
+    const customInput = field.querySelector("[data-input-choice-custom]");
+
+    buttons.forEach((button) => {
+      button.addEventListener("click", () => {
+        control.value = button.dataset.inputChoiceValue || "";
+        buttons.forEach((option) => {
+          const selected = option === button;
+          option.classList.toggle("is-selected", selected);
+          option.setAttribute("aria-pressed", String(selected));
+        });
+        if (customInput) customInput.value = "";
+      });
+    });
+
+    customInput?.addEventListener("input", () => {
+      control.value = customInput.value;
+      if (!customInput.value) return;
+      buttons.forEach((option) => {
+        option.classList.remove("is-selected");
+        option.setAttribute("aria-pressed", "false");
+      });
+    });
+  });
+}
+
 function modalInputControl(name) {
   return [...els.inputFields.querySelectorAll("[data-input-name]")]
     .find((control) => control.dataset.inputName === name) || null;
@@ -6615,8 +6691,12 @@ function normalizeInputOptions(options) {
   const seen = new Set();
   return options
     .map((option) => {
-      if (typeof option === "string") return { value: option, label: option };
-      return { value: String(option?.value ?? ""), label: String(option?.label ?? option?.value ?? "") };
+      if (typeof option === "string") return { value: option, label: option, meta: "" };
+      return {
+        value: String(option?.value ?? ""),
+        label: String(option?.label ?? option?.value ?? ""),
+        meta: String(option?.meta ?? ""),
+      };
     })
     .filter((option) => {
       if (!option.value || seen.has(option.value)) return false;
@@ -6634,7 +6714,8 @@ function submitInputModal() {
     const schema = state.inputFieldsSchema.find((field) => field.name === name) || {};
     if (schema.required !== false && !value) {
       showToast(`${schema.label || "값"}을 입력하세요.`);
-      control.focus();
+      const choiceField = control.closest("[data-input-choice-name]");
+      (choiceField?.querySelector(".input-choice-custom, .input-choice-option") || control).focus();
       return;
     }
     values[name] = value;
@@ -11152,7 +11233,7 @@ async function mergeReviewGroup(key) {
     badge: "검토 병합",
     confirmText: "병합 확인",
     fields: [
-      { name: "target", label: "기준 프로젝트명", value: defaultTarget, placeholder: "프로젝트명" },
+      { name: "target", label: "기준 프로젝트명", type: "choice", value: defaultTarget, options: liveProjectMergeOptions(group.channel, mergeInfo.projects), allowCustom: true, customPlaceholder: "직접 입력" },
     ],
   });
   const target = input?.target?.trim();
