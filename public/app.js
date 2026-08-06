@@ -319,6 +319,8 @@ const els = {
   colorSwatches: document.getElementById("colorSwatches"),
   statusOptions: document.getElementById("statusOptions"),
   detailOptions: document.getElementById("detailOptions"),
+  detailDropdownToggle: document.getElementById("detailDropdownToggle"),
+  detailDropdownLabel: document.getElementById("detailDropdownLabel"),
   detailPresetButtons: document.getElementById("detailPresetButtons"),
   deleteButton: document.getElementById("deleteButton"),
   contextMenu: document.getElementById("contextMenu"),
@@ -468,13 +470,21 @@ function bindEvents() {
   document.addEventListener("pointerdown", () => window.focus?.(), { capture: true });
   els.refreshButton.addEventListener("click", () => loadTasks({ force: true }));
   els.newTaskButton.addEventListener("click", newTask);
+  els.detailDropdownToggle?.addEventListener("click", () => {
+    const willOpen = Boolean(els.detailPresetButtons?.hidden);
+    if (els.detailPresetButtons) els.detailPresetButtons.hidden = !willOpen;
+    els.detailDropdownToggle.setAttribute("aria-expanded", String(willOpen));
+  });
   els.detailPresetButtons?.addEventListener("click", (event) => {
     const button = event.target.closest("[data-detail-preset]");
-    if (!button) return;
-    applyDetailPreset(button.dataset.detailPreset || "");
+    if (button) {
+      applyDetailPreset(button.dataset.detailPreset || "");
+      return;
+    }
+    if (event.target.closest("[data-detail-custom]")) showDetailCustomInput();
   });
   els.detailField.addEventListener("input", () => {
-    renderDetailPresets(els.detailField.value);
+    renderDetailPresets(els.detailField.value, { showCustom: true });
     const preset = detailPresetFor(els.detailField.value);
     if (preset) renderSwatches(preset.color);
   });
@@ -4260,6 +4270,11 @@ function renderRows(rows, criticalTaskIds) {
       const model = state.rows.find((item) => item.id === row.dataset.taskId);
       if (model) selectRow(model, event);
     });
+    row.addEventListener("dblclick", (event) => {
+      if (event.target.closest("[data-inline-edit], [data-range-edit], [data-meta-edit], button")) return;
+      const model = state.rows.find((item) => item.id === row.dataset.taskId);
+      if (model) openSidebarRowEditor(model);
+    });
     row.addEventListener("contextmenu", (event) => openTaskContext(event, row.dataset.taskId));
   });
   els.taskTable.querySelectorAll("[data-row-id]").forEach((element) => {
@@ -4309,7 +4324,7 @@ function renderRows(rows, criticalTaskIds) {
     element.addEventListener("dblclick", (event) => {
       if (event.target.closest("[data-inline-edit], [data-range-edit], button")) return;
       const row = state.rows.find((item) => item.id === element.dataset.rowId);
-      if (row) openGroupEditor(row);
+      if (row) openSidebarRowEditor(row);
     });
     element.addEventListener("contextmenu", (event) => {
       const row = state.rows.find((item) => item.id === element.dataset.rowId);
@@ -5079,25 +5094,41 @@ function renderSwatches(selectedColor) {
   els.colorField.value = selectedColor;
 }
 
-function renderDetailPresets(selectedDetail = "") {
-  if (!els.detailPresetButtons) return;
+function renderDetailPresets(selectedDetail = "", options = {}) {
+  if (!els.detailPresetButtons || !els.detailDropdownToggle || !els.detailDropdownLabel || !els.detailField) return;
+  const detail = String(selectedDetail || "").trim();
   const selectedKey = normalizePresetText(selectedDetail);
+  const selectedPreset = DETAIL_PRESETS.find((preset) => normalizePresetText(preset.value) === selectedKey) || null;
   els.detailPresetButtons.innerHTML = DETAIL_PRESETS.map((preset) => `
     <button
-      class="${normalizePresetText(preset.value) === selectedKey ? "is-selected" : ""}"
+      class="input-choice-option${normalizePresetText(preset.value) === selectedKey ? " is-selected" : ""}"
       type="button"
       data-detail-preset="${escapeHtml(preset.value)}"
-      style="--preset-color:${preset.color}">
+      aria-pressed="${normalizePresetText(preset.value) === selectedKey ? "true" : "false"}">
       ${escapeHtml(preset.label)}
     </button>
-  `).join("");
+  `).join("") + '<button class="input-choice-option input-choice-new" type="button" data-detail-custom>+ 직접 입력</button>';
+  els.detailDropdownLabel.textContent = detail || "상세일정 선택";
+  els.detailDropdownLabel.classList.toggle("is-placeholder", !detail);
+  els.detailPresetButtons.hidden = true;
+  els.detailDropdownToggle.setAttribute("aria-expanded", "false");
+  const showCustom = options.showCustom ?? Boolean(detail && !selectedPreset);
+  els.detailField.hidden = !showCustom;
 }
 
 function applyDetailPreset(detail) {
   const preset = detailPresetFor(detail);
   els.detailField.value = preset?.value || detail || "";
   renderSwatches(preset?.color || colorForDetail(detail, els.colorField.value || PALETTE[0]));
-  renderDetailPresets(els.detailField.value);
+  renderDetailPresets(els.detailField.value, { showCustom: false });
+}
+
+function showDetailCustomInput() {
+  renderDetailPresets(els.detailField.value, { showCustom: true });
+  window.requestAnimationFrame(() => {
+    els.detailField.focus();
+    els.detailField.select();
+  });
 }
 
 function detailPresetFor(value) {
@@ -8184,7 +8215,7 @@ function selectRow(row, event = {}, options = {}) {
 
   if (event.shiftKey && state.selectionAnchorRowId) {
     const ids = taskIdsInRowRange(state.selectionAnchorRowId, row.id);
-    applySelection(ids, row.id, ids.length === 1 && row.kind === "task");
+    applySelection(ids, row.id, false);
     renderSelectionOnly();
     if (shouldFocusTimeline) scheduleSelectedRangeFocus(rowTaskIds, { center: true });
     return;
@@ -8198,13 +8229,13 @@ function selectRow(row, event = {}, options = {}) {
       else next.add(id);
     });
     state.selectionAnchorRowId = row.id;
-    applySelection([...next], row.id, next.size === 1);
+    applySelection([...next], row.id, false);
     renderSelectionOnly();
     if (shouldFocusTimeline) scheduleSelectedRangeFocus(rowTaskIds, { center: true });
     return;
   }
 
-  applySelection(rowTaskIds, row.id, row.kind === "task" && rowTaskIds.length === 1);
+  applySelection(rowTaskIds, row.id, row.kind === "task");
   renderSelectionOnly();
   if (shouldFocusTimeline) scheduleSelectedRangeFocus(rowTaskIds);
 }
@@ -8214,7 +8245,7 @@ function applySelection(ids, anchorRowId = "", openEditor = false) {
   state.selectedIds = new Set(uniqueIds);
   state.selectedId = uniqueIds[0] || "";
   state.selectionAnchorRowId = anchorRowId || rowIdForTaskId(state.selectedId) || "";
-  state.editorOpen = Boolean(openEditor && uniqueIds.length === 1 && state.selectedId);
+  state.editorOpen = Boolean(openEditor && state.selectedId);
   state.editorMode = "task";
   state.editorRowId = "";
   if (!state.editorOpen && uniqueIds.length !== 1) hideContextMenu();
@@ -8612,7 +8643,7 @@ function endSelectionDrag(event) {
   const rect = selectionRect(drag.startX, drag.startY, event.clientX, event.clientY);
   const ids = new Set(drag.baseIds);
   collectTaskIdsInRect(rect).forEach((id) => ids.add(id));
-  applySelection([...ids], "", ids.size === 1);
+  applySelection([...ids], "", false);
   renderSelectionOnly();
   scheduleSelectedRangeFocus([...ids], { center: true });
   setTimeout(() => {
@@ -8786,6 +8817,16 @@ function selectTask(id) {
   applySelection([id], id, true);
   renderSelectionOnly();
   scheduleSelectedRangeFocus([id], { center: true });
+}
+
+function openSidebarRowEditor(row) {
+  if (!row) return;
+  if (row.kind === "task") {
+    applySelection(taskIdsForRow(row), row.id, true);
+    renderSelectionOnly();
+    return;
+  }
+  openGroupEditor(row);
 }
 
 function openGroupEditorFromContext(context) {
@@ -11870,8 +11911,12 @@ function resetTaskSourceContent() {
 }
 
 function syncTaskSourceContent(task) {
+  syncPlanContentForScope(taskContentPageId(task));
+}
+
+function syncPlanContentForScope(scopeId) {
   if (!els.planContent || !els.planContentBody || !els.planContentStatus || !els.planContentMedia) return;
-  const pageId = taskContentPageId(task);
+  const pageId = String(scopeId || "").trim();
   if (!pageId) {
     resetTaskSourceContent();
     return;
@@ -12092,9 +12137,11 @@ function projectMetaTaskForRow(row) {
   return state.tasks.find((task) => ids.has(task.id) && isProjectMetaTask(task)) || null;
 }
 
+function groupContentScopeId(row) {
+  return projectMetaTaskForRow(row)?.id || (row?.id ? `group:${row.id}` : "");
+}
+
 function syncGroupEditor(row) {
-  if (els.planContent) els.planContent.hidden = true;
-  els.descriptionField?.classList.toggle("has-plan-content", false);
   setGroupEditorFieldMode(row);
   const label = groupKindLabel(row.kind);
   els.editorTitle.textContent = `${row.title} · ${label}`;
@@ -12111,6 +12158,7 @@ function syncGroupEditor(row) {
   renderSwatches(row.color || PALETTE[0]);
   renderDetailPresets("");
   els.deleteButton.disabled = true;
+  syncPlanContentForScope(groupContentScopeId(row));
 }
 
 function setTaskEditorFieldMode() {

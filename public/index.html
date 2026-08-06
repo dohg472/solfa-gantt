@@ -4,8 +4,8 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>솔파 간트</title>
-    <link rel="stylesheet" href="/styles.css?v=20260806-dropdown-picker2" />
-    <script src="/app.js?v=20260806-dropdown-picker2" defer></script>
+    <link rel="stylesheet" href="/styles.css?v=20260806-editor-polish" />
+    <script src="/app.js?v=20260806-editor-polish" defer></script>
   </head>
   <body>
     <div class="app">
@@ -155,9 +155,15 @@
             </label>
             <label>
               <span>상세일정</span>
-              <input id="detailField" name="detail" type="text" list="detailOptions" autocomplete="off" />
+              <input id="detailField" name="detail" type="text" list="detailOptions" autocomplete="off" hidden />
               <datalist id="detailOptions"></datalist>
-              <div id="detailPresetButtons" class="detail-presets" aria-label="상세일정 빠른 선택"></div>
+              <div class="editor-detail-dropdown">
+                <button id="detailDropdownToggle" class="input-dropdown-toggle" type="button" aria-expanded="false" aria-controls="detailPresetButtons">
+                  <span id="detailDropdownLabel" class="input-dropdown-label is-placeholder">상세일정 선택</span>
+                  <span class="input-dropdown-caret" aria-hidden="true">▾</span>
+                </button>
+                <div id="detailPresetButtons" class="input-choice-list" aria-label="상세일정 선택" hidden></div>
+              </div>
             </label>
             <label>
               <span>노션 제목</span>

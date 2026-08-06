@@ -2160,14 +2160,12 @@ body.is-dragging .gantt-bar.task .bar-handle::after {
   box-shadow: 0 0 0 3px rgba(35, 131, 226, 0.12);
 }
 
-.detail-presets,
 .input-presets {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
 }
 
-.detail-presets button,
 .input-presets button {
   min-height: 28px;
   padding: 0 9px;
@@ -2179,7 +2177,6 @@ body.is-dragging .gantt-bar.task .bar-handle::after {
   font-weight: 600;
 }
 
-.detail-presets button::before,
 .input-presets button::before {
   content: "";
   display: inline-block;
@@ -2191,11 +2188,21 @@ body.is-dragging .gantt-bar.task .bar-handle::after {
   vertical-align: 1px;
 }
 
-.detail-presets button:hover,
-.detail-presets button.is-selected,
 .input-presets button:hover {
   border-color: var(--preset-color);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--preset-color) 16%, transparent);
+}
+
+.editor-detail-dropdown {
+  display: grid;
+  gap: 4px;
+}
+
+.editor-detail-dropdown .input-choice-list {
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-strong);
 }
 
 .form-grid {

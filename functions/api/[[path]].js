@@ -1314,8 +1314,23 @@ async function getPageInDatabase(env, id, databaseId) {
 }
 
 async function getTaskPageContent(env, id) {
-  const pageId = String(id || "").split(":")[0].trim();
+  const requestedId = String(id || "").trim();
+  const isGroupScope = requestedId.startsWith("group:");
+  if (isGroupScope && requestedId.length > 300) throw httpError(400, "그룹 첨부 범위 ID는 300자 이하여야 합니다.");
+  const pageId = isGroupScope ? requestedId : requestedId.split(":")[0].trim();
   if (!pageId) throw httpError(400, "내용을 불러올 일정 ID가 없습니다.");
+  if (isGroupScope) {
+    return {
+      pageId,
+      source: "group",
+      content: "",
+      planText: "",
+      editable: false,
+      blockCount: 0,
+      truncated: false,
+      media: await getGanttAttachmentMedia(env, pageId),
+    };
+  }
   const page = await notionRequest(env, `/v1/pages/${encodeURIComponent(pageId)}`, { method: "GET" });
   const readDatabaseId = config(env).readDatabaseId;
   const writeDatabaseId = config(env).writeDatabaseId;
@@ -1328,19 +1343,7 @@ async function getTaskPageContent(env, id) {
 
   const context = { lines: [], media: [], topBlocks: [], blockCount: 0, charCount: 0, truncated: false };
   await collectNotionBlockContent(env, pageId, 0, context);
-  let attachments = [];
-  try {
-    attachments = JSON.parse(await env.SOLPA_GANTT_KV?.get(`solpa:gantt:attachments:${pageId}`) || "[]");
-  } catch {
-    attachments = [];
-  }
-  const attachmentMedia = (Array.isArray(attachments) ? attachments : []).map((item) => ({
-    id: item.id,
-    kind: /^image\//i.test(item.type || "") ? "image" : "file",
-    url: `/api/attachments/${item.id}`,
-    label: item.name || "파일",
-    ganttOnly: true,
-  }));
+  const attachmentMedia = await getGanttAttachmentMedia(env, pageId);
   return {
     pageId: page.id || pageId,
     source,
@@ -1351,6 +1354,22 @@ async function getTaskPageContent(env, id) {
     editable: isEditableTaskPage(context.topBlocks, context.truncated),
     planText: serializePlanBlocks(context.topBlocks),
   };
+}
+
+async function getGanttAttachmentMedia(env, pageId) {
+  let attachments = [];
+  try {
+    attachments = JSON.parse(await env.SOLPA_GANTT_KV?.get(`solpa:gantt:attachments:${pageId}`) || "[]");
+  } catch {
+    attachments = [];
+  }
+  return (Array.isArray(attachments) ? attachments : []).map((item) => ({
+    id: item.id,
+    kind: /^image\//i.test(item.type || "") ? "image" : "file",
+    url: `/api/attachments/${item.id}`,
+    label: item.name || "파일",
+    ganttOnly: true,
+  }));
 }
 
 
@@ -1390,13 +1409,18 @@ function serializePlanBlocks(blocks) {
 }
 
 async function addTaskAttachment(env, id, request) {
-  const pageId = String(id || "").split(":")[0].trim();
+  const requestedId = String(id || "").trim();
+  const isGroupScope = requestedId.startsWith("group:");
+  if (isGroupScope && requestedId.length > 300) throw httpError(400, "그룹 첨부 범위 ID는 300자 이하여야 합니다.");
+  const pageId = isGroupScope ? requestedId : requestedId.split(":")[0].trim();
   if (!pageId) throw httpError(400, "첨부할 일정 ID가 없습니다.");
-  const page = await notionRequest(env, `/v1/pages/${encodeURIComponent(pageId)}`, { method: "GET" });
-  const readDatabaseId = config(env).readDatabaseId;
-  const writeDatabaseId = config(env).writeDatabaseId;
-  if (!pageBelongsToDatabase(page, readDatabaseId) && !pageBelongsToDatabase(page, writeDatabaseId)) {
-    throw httpError(404, "간트에 연결된 프로덕션 플랜 페이지가 아닙니다.");
+  if (!isGroupScope) {
+    const page = await notionRequest(env, `/v1/pages/${encodeURIComponent(pageId)}`, { method: "GET" });
+    const readDatabaseId = config(env).readDatabaseId;
+    const writeDatabaseId = config(env).writeDatabaseId;
+    if (!pageBelongsToDatabase(page, readDatabaseId) && !pageBelongsToDatabase(page, writeDatabaseId)) {
+      throw httpError(404, "간트에 연결된 프로덕션 플랜 페이지가 아닙니다.");
+    }
   }
 
   const form = await request.formData();
