@@ -2617,11 +2617,60 @@ body.is-dragging .gantt-bar.task .bar-handle::after {
   box-shadow: 0 0 0 3px rgba(35, 131, 226, 0.12);
 }
 
+.input-dropdown-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  height: 40px;
+  padding: 0 11px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  outline: 0;
+  background: var(--surface-strong);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.input-dropdown-toggle:focus {
+  border-color: rgba(35, 131, 226, 0.7);
+  box-shadow: 0 0 0 3px rgba(35, 131, 226, 0.12);
+}
+
+.input-dropdown-toggle .input-dropdown-label {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 400;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.input-dropdown-toggle .input-dropdown-label.is-placeholder {
+  color: var(--muted);
+}
+
+.input-dropdown-toggle .input-dropdown-caret {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 400;
+}
+
 .input-choice-list {
   display: grid;
   gap: 4px;
   max-height: 240px;
   overflow-y: auto;
+}
+
+.input-choice-list[hidden] {
+  display: none;
 }
 
 .input-choice-option {
@@ -2647,6 +2696,11 @@ body.is-dragging .gantt-bar.task .bar-handle::after {
 .input-choice-option.is-selected {
   border-color: rgba(35, 131, 226, 0.55);
   background: #e7f3f8;
+}
+
+.input-choice-new {
+  color: var(--accent-strong);
+  font-weight: 500;
 }
 
 .input-choice-option .input-choice-meta {

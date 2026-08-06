@@ -6620,7 +6620,7 @@ function openInputModal({ title, summary, fields, confirmText = "저장", badge 
     els.inputModalBackdrop.hidden = false;
     els.inputModal.hidden = false;
     window.requestAnimationFrame(() => {
-      const focusTarget = els.inputFields.querySelector('input:not([type="hidden"]), select, textarea, .input-choice-option');
+      const focusTarget = els.inputFields.querySelector('input:not([type="hidden"]):not([hidden]), select, textarea, .input-dropdown-toggle, .input-choice-option');
       focusTarget?.focus();
       if (focusTarget?.select) focusTarget.select();
     });
@@ -6654,6 +6654,37 @@ function inputFieldMarkup(field, index) {
     const customPlaceholder = field.customPlaceholder
       ? ` placeholder="${escapeHtml(field.customPlaceholder)}"`
       : "";
+    if (field.collapsed) {
+      const selectedOption = options.find((option) => option.value === value);
+      const togglePlaceholder = String(field.togglePlaceholder || field.placeholder || `${label} 선택`);
+      const toggleLabel = selectedOption?.label || value || togglePlaceholder;
+      const customLabel = String(field.customLabel || "+ 직접 입력");
+      return `
+        <div class="input-field" data-input-field-name="${escapeHtml(name)}" data-input-choice-name="${escapeHtml(name)}" data-input-choice-collapsed="true" data-input-toggle-placeholder="${escapeHtml(togglePlaceholder)}" role="group" aria-labelledby="${inputId}Label">
+          <span id="${inputId}Label">${escapeHtml(label)}</span>
+          <input id="${inputId}" data-input-name="${escapeHtml(name)}" type="hidden" value="${escapeHtml(value)}" />
+          <button type="button" class="input-dropdown-toggle" data-input-dropdown-toggle aria-expanded="false" aria-controls="${inputId}Options">
+            <span class="input-dropdown-label${value ? "" : " is-placeholder"}">${escapeHtml(toggleLabel)}</span>
+            <span class="input-dropdown-caret" aria-hidden="true">▾</span>
+          </button>
+          <div id="${inputId}Options" class="input-choice-list" data-input-choice-list hidden>
+            ${options.map((option) => `
+              <button
+                class="input-choice-option${option.value === value ? " is-selected" : ""}"
+                type="button"
+                data-input-choice-value="${escapeHtml(option.value)}"
+                data-input-choice-label="${escapeHtml(option.label)}"
+                aria-pressed="${option.value === value ? "true" : "false"}">
+                ${escapeHtml(option.label)}
+                ${option.meta ? `<span class="input-choice-meta">${escapeHtml(option.meta)}</span>` : ""}
+              </button>
+            `).join("")}
+            <button class="input-choice-option input-choice-new" type="button" data-input-choice-new>${escapeHtml(customLabel)}</button>
+          </div>
+          <input class="input-choice-custom" data-input-choice-custom type="text" value="${escapeHtml(customValue)}"${customPlaceholder} aria-label="${escapeHtml(label)} 직접 입력"${customValue ? "" : " hidden"} />
+        </div>
+      `;
+    }
     return `
       <div class="input-field" data-input-field-name="${escapeHtml(name)}" data-input-choice-name="${escapeHtml(name)}" role="group" aria-labelledby="${inputId}Label">
         <span id="${inputId}Label">${escapeHtml(label)}</span>
@@ -6779,6 +6810,74 @@ function bindInputModalChoiceField(field) {
   const name = field.dataset.inputChoiceName || "";
   const control = modalInputControl(name);
   if (!control) return;
+  const dropdownToggle = field.querySelector("[data-input-dropdown-toggle]");
+  const choiceList = field.querySelector("[data-input-choice-list]");
+  const dropdownLabel = field.querySelector(".input-dropdown-label");
+  const newButton = field.querySelector("[data-input-choice-new]");
+  if (dropdownToggle && choiceList && dropdownLabel && newButton) {
+    const buttons = [...field.querySelectorAll("[data-input-choice-value]")];
+    const customInput = field.querySelector("[data-input-choice-custom]");
+    const placeholder = field.dataset.inputTogglePlaceholder || "";
+    const collapseList = () => {
+      choiceList.hidden = true;
+      dropdownToggle.setAttribute("aria-expanded", "false");
+    };
+    const clearSelection = () => {
+      buttons.forEach((option) => {
+        option.classList.remove("is-selected");
+        option.setAttribute("aria-pressed", "false");
+      });
+    };
+    const setToggleLabel = (value) => {
+      const nextLabel = String(value || "");
+      dropdownLabel.textContent = nextLabel || placeholder;
+      dropdownLabel.classList.toggle("is-placeholder", !nextLabel);
+    };
+
+    dropdownToggle.addEventListener("click", () => {
+      const willOpen = choiceList.hidden;
+      choiceList.hidden = !willOpen;
+      dropdownToggle.setAttribute("aria-expanded", String(willOpen));
+    });
+
+    buttons.forEach((button) => {
+      button.addEventListener("click", () => {
+        control.value = button.dataset.inputChoiceValue || "";
+        clearSelection();
+        button.classList.add("is-selected");
+        button.setAttribute("aria-pressed", "true");
+        setToggleLabel(button.dataset.inputChoiceLabel || control.value);
+        collapseList();
+        if (customInput) {
+          customInput.hidden = true;
+          customInput.value = "";
+        }
+        notifyInputModalFieldChange(name, control.value);
+      });
+    });
+
+    newButton.addEventListener("click", () => {
+      control.value = "";
+      clearSelection();
+      setToggleLabel("");
+      collapseList();
+      if (customInput) {
+        customInput.value = "";
+        customInput.hidden = false;
+        window.requestAnimationFrame(() => customInput.focus());
+      }
+      notifyInputModalFieldChange(name, control.value);
+    });
+
+    customInput?.addEventListener("input", () => {
+      control.value = customInput.value;
+      clearSelection();
+      setToggleLabel(control.value);
+      notifyInputModalFieldChange(name, control.value);
+    });
+    return;
+  }
+
   const buttons = [...field.querySelectorAll(".input-choice-option")];
   const customInput = field.querySelector("[data-input-choice-custom]");
 
@@ -6885,6 +6984,32 @@ function setInputModalValue(fieldName, value) {
   }
 
   if (schema.type === "choice") {
+    if (schema.collapsed) {
+      const buttons = [...field.querySelectorAll("[data-input-choice-value]")];
+      const selectedButton = buttons.find((button) => button.dataset.inputChoiceValue === nextValue);
+      buttons.forEach((button) => {
+        const selected = button === selectedButton;
+        button.classList.toggle("is-selected", selected);
+        button.setAttribute("aria-pressed", String(selected));
+      });
+      const customInput = field.querySelector("[data-input-choice-custom]");
+      if (customInput) {
+        customInput.value = selectedButton ? "" : nextValue;
+        customInput.hidden = Boolean(selectedButton) || !nextValue;
+      }
+      const dropdownToggle = field.querySelector("[data-input-dropdown-toggle]");
+      const choiceList = field.querySelector("[data-input-choice-list]");
+      const dropdownLabel = field.querySelector(".input-dropdown-label");
+      const displayLabel = selectedButton?.dataset.inputChoiceLabel || nextValue;
+      if (dropdownLabel) {
+        dropdownLabel.textContent = displayLabel || field.dataset.inputTogglePlaceholder || "";
+        dropdownLabel.classList.toggle("is-placeholder", !displayLabel);
+      }
+      if (choiceList) choiceList.hidden = true;
+      dropdownToggle?.setAttribute("aria-expanded", "false");
+      control.value = nextValue;
+      return;
+    }
     const buttons = [...field.querySelectorAll(".input-choice-option")];
     const selectedButton = buttons.find((button) => button.dataset.inputChoiceValue === nextValue);
     buttons.forEach((button) => {
@@ -6955,7 +7080,7 @@ function submitInputModal() {
     if (schema.required !== false && !value) {
       showToast(`${schema.label || "값"}을 입력하세요.`);
       const compositeField = control.closest("[data-input-choice-name], [data-input-select-name]");
-      (compositeField?.querySelector(".input-choice-custom, .input-select-custom:not([hidden]), .input-choice-option, select") || control).focus();
+      (compositeField?.querySelector(".input-choice-custom:not([hidden]), .input-select-custom:not([hidden]), .input-dropdown-toggle, .input-choice-option, select") || control).focus();
       return;
     }
     values[name] = value;
@@ -12106,6 +12231,7 @@ async function openCreateTaskModal(seed, copy = {}) {
   const end = seed.end && compareDate(seed.end, start) < 0 ? start : seed.end || "";
   const channelOptions = liveChannelOptions();
   const projectOptions = liveProjectPickerOptions(seed.channel || "");
+  const collapsedChoices = !copy.lockChannel && !copy.lockProject;
   const input = await openInputModal({
     title: copy.title || "새 일정 만들기",
     summary: copy.summary || "02 제작 간트에 새 일정을 만듭니다. 채널팀 플랜 원본은 건드리지 않습니다.",
@@ -12120,6 +12246,9 @@ async function openCreateTaskModal(seed, copy = {}) {
         options: channelOptions,
         allowCustom: true,
         customPlaceholder: "신규 채널 이름",
+        collapsed: collapsedChoices,
+        customLabel: "+ 신규 채널 만들기",
+        togglePlaceholder: "채널 선택",
         locked: Boolean(copy.lockChannel),
       },
       {
@@ -12130,16 +12259,22 @@ async function openCreateTaskModal(seed, copy = {}) {
         options: projectOptions,
         allowCustom: true,
         customPlaceholder: "신규 프로젝트 이름",
+        collapsed: collapsedChoices,
+        customLabel: "+ 신규 프로젝트 만들기",
+        togglePlaceholder: "프로젝트 선택",
         locked: Boolean(copy.lockProject),
       },
       {
         name: "detail",
         label: "상세일정",
-        type: "select",
+        type: collapsedChoices ? "choice" : "select",
         value: seed.detail || "",
         options: DETAIL_PRESETS.map(({ value, label }) => ({ value, label })),
         allowCustom: true,
         customPlaceholder: "상세일정 이름",
+        collapsed: collapsedChoices,
+        customLabel: "+ 직접 입력",
+        togglePlaceholder: "상세일정 선택",
       },
       { name: "description", label: "내용", value: seed.description || "", type: "textarea", required: false, placeholder: "메모" },
       { name: "start", label: "시작", value: start, type: "date" },
