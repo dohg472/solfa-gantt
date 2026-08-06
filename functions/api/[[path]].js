@@ -1,6 +1,8 @@
 const STORE_KEY = "solpa:gantt:store:v1";
 const TASK_CACHE_KEY = "solpa:gantt:tasks-cache:v1";
+const TASK_CACHE_REFRESH_LOCK_KEY = "solpa:gantt:task-cache:refreshing";
 const TASK_CACHE_MS = 5 * 60 * 1000;
+const TASK_CACHE_STALE_MS = 30 * 60 * 1000;
 const COMPLETED_HIDE_GRACE_DAYS = 1;
 const PAGE_CONTENT_MAX_BLOCKS = 180;
 const PAGE_CONTENT_MAX_CHARS = 16000;
@@ -69,14 +71,18 @@ const DEFAULT_PROJECT_ALIAS_RULES = [
 
 export async function onRequest(context) {
   try {
-    return await route(context);
+    return await route({
+      request: context.request,
+      env: context.env,
+      waitUntil: (promise) => context.waitUntil(promise),
+    });
   } catch (error) {
     const status = Number(error.status || 500);
     return json({ error: error.message || "서버에서 처리하지 못한 오류가 발생했습니다." }, status);
   }
 }
 
-async function route({ request, env }) {
+async function route({ request, env, waitUntil }) {
   const url = new URL(request.url);
   const path = url.pathname.replace(/^\/api/, "") || "/";
 
@@ -88,7 +94,7 @@ async function route({ request, env }) {
 
   if (path === "/tasks" && request.method === "GET") {
     const forceRefresh = ["1", "true", "yes"].includes(String(url.searchParams.get("refresh") || "").toLowerCase());
-    return json(await getTasksPayload(env, request, { forceRefresh }));
+    return json(await getTasksPayload(env, request, { forceRefresh, waitUntil }));
   }
 
   if (path === "/sync-status" && request.method === "GET") {
@@ -256,7 +262,18 @@ async function getTasksPayload(env, request, options = {}) {
   const store = await readStore(env);
   const now = Date.now();
   const cache = options.forceRefresh ? null : await readTaskCache(env);
-  if (cache?.expiresAt > now) {
+  const cacheWrittenAt = Number(cache?.writtenAt || 0);
+  const cacheAge = cacheWrittenAt ? Math.max(0, now - cacheWrittenAt) : Number.POSITIVE_INFINITY;
+  if (cache?.payload && cacheWrittenAt && cacheAge < TASK_CACHE_MS) {
+    return decorateTaskPayload(cache.payload, store, request, env);
+  }
+  if (cache?.payload && (!cacheWrittenAt || cacheAge <= TASK_CACHE_STALE_MS)) {
+    const refreshPromise = refreshTaskCacheInBackground(env, request);
+    if (typeof options.waitUntil === "function") {
+      options.waitUntil(refreshPromise);
+    } else {
+      await refreshPromise;
+    }
     return decorateTaskPayload(cache.payload, store, request, env);
   }
 
@@ -353,8 +370,20 @@ async function getTasksPayload(env, request, options = {}) {
     loadedAt: sourceRefreshedAt,
   };
 
-  await writeTaskCache(env, payload, now + TASK_CACHE_MS);
+  await writeTaskCache(env, payload);
   return payload;
+}
+
+async function refreshTaskCacheInBackground(env, request) {
+  if (!env.SOLPA_GANTT_KV) return;
+  try {
+    const refreshing = await env.SOLPA_GANTT_KV.get(TASK_CACHE_REFRESH_LOCK_KEY);
+    if (refreshing) return;
+    await env.SOLPA_GANTT_KV.put(TASK_CACHE_REFRESH_LOCK_KEY, new Date().toISOString(), { expirationTtl: 120 });
+    await getTasksPayload(env, request, { forceRefresh: true });
+  } catch (error) {
+    console.error("Background task cache refresh failed", error);
+  }
 }
 
 async function loadOptionalDatabase(env, databaseId, kind) {
@@ -1611,9 +1640,11 @@ async function readTaskCache(env) {
   }
 }
 
-async function writeTaskCache(env, payload, expiresAt) {
+async function writeTaskCache(env, payload) {
   if (!env.SOLPA_GANTT_KV) return;
-  await env.SOLPA_GANTT_KV.put(TASK_CACHE_KEY, JSON.stringify({ payload, expiresAt }), { expirationTtl: 600 });
+  const writtenAt = Date.now();
+  const expiresAt = writtenAt + TASK_CACHE_MS;
+  await env.SOLPA_GANTT_KV.put(TASK_CACHE_KEY, JSON.stringify({ payload, writtenAt, expiresAt }), { expirationTtl: 3600 });
 }
 
 async function invalidateTaskCache(env) {

@@ -34,7 +34,7 @@ const EMBED_KEY = embedKeyFromLocation();
 const SYNC_CHANNEL_NAME = "solpa-gantt-sync";
 const VIEW_PREFS_KEY = "solpa-gantt-view";
 const REVIEW_PANEL_PREFS_KEY = "solpa-gantt-review-panel";
-const SYNC_STATUS_INTERVAL_MS = 15000;
+const SYNC_STATUS_INTERVAL_MS = 60000;
 const FULL_SYNC_INTERVAL_MS = 300000;
 const SYNC_RETRY_INTERVAL_MS = 30000;
 const DEFAULT_COLLAPSED_REVIEW_SECTIONS = ["upload-only", "missing-upload", "completed"];
@@ -193,6 +193,51 @@ const state = {
 };
 
 let lastReviewAlertSyncAt = 0;
+let projectReviewReportMemoSignature = null;
+let projectReviewReportMemoValue = null;
+
+function derivedDataSignature() {
+  return [
+    state.tasks,
+    state.tasks.length,
+    state.loadedAt,
+    state.filters ? JSON.stringify(state.filters) : "",
+    state.search || "",
+    state.collapsedRows.size,
+    [...state.collapsedRows].join("|"),
+    state.zoom,
+    state.density,
+    state.rowOrder?.length || 0,
+    (state.rowOrder || []).join("|"),
+    state.groupRanges ? JSON.stringify(state.groupRanges) : "",
+    state.groupNotes ? JSON.stringify(state.groupNotes) : "",
+    state.hiddenProjects,
+    (state.hiddenProjects || []).length,
+    state.reviewIgnores,
+    (state.reviewIgnores || []).length,
+    state.projectAliases,
+    (state.projectAliases || []).length,
+    state.revealedProjects,
+    state.revealedProjects ? JSON.stringify(state.revealedProjects) : "",
+    state.showCompleted,
+    state.showCritical,
+    state.showDependencies,
+    state.showBaseline,
+    state.filters?.risk || "",
+    state.tableWidth,
+    state.rangeStart,
+    state.rangeEnd,
+  ];
+}
+
+function derivedDataSignaturesEqual(left, right) {
+  return Boolean(
+    left &&
+    right &&
+    left.length === right.length &&
+    left.every((value, index) => value === right[index])
+  );
+}
 
 const els = {
   connectionLine: document.getElementById("connectionLine"),
@@ -1110,7 +1155,9 @@ function setupSync() {
   window.addEventListener("focus", () => requestSyncRefresh("focus", 100));
   window.addEventListener("pageshow", () => requestSyncRefresh("pageshow", 100));
   document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "visible") requestSyncRefresh("visible", 100);
+    if (document.visibilityState !== "visible") return;
+    checkSyncStatus();
+    requestSyncRefresh("visible", 100);
   });
   setupServerEvents();
   state.syncStatusTimer = window.setInterval(() => {
@@ -1118,7 +1165,7 @@ function setupSync() {
   }, SYNC_STATUS_INTERVAL_MS);
   state.autoSyncTimer = window.setInterval(() => {
     if (document.visibilityState === "visible") {
-      requestSyncRefresh("full-timer", 800, { force: isSourceSnapshotStale() });
+      requestSyncRefresh("full-timer", 800);
     }
   }, FULL_SYNC_INTERVAL_MS);
 }
@@ -1145,13 +1192,13 @@ function handleServerSyncSnapshot(event) {
 function handleServerSyncEvent(event) {
   const payload = parseServerSyncEvent(event);
   if (!payload?.version) {
-    requestSyncRefresh("server-event", 150, { force: true });
+    requestSyncRefresh("server-event", 150);
     return;
   }
   if (state.syncVersion && payload.version === state.syncVersion) return;
   state.syncVersion = payload.version;
   state.syncChangedAt = payload.changedAt || state.syncChangedAt;
-  requestSyncRefresh(payload.reason || "server-event", 150, { force: true });
+  requestSyncRefresh(payload.reason || "server-event", 150);
 }
 
 function parseServerSyncEvent(event) {
@@ -1164,7 +1211,7 @@ function parseServerSyncEvent(event) {
 
 function handleSyncMessage(message) {
   if (!message || message.clientId === state.syncClientId || message.type !== "changed") return;
-  requestSyncRefresh("remote", 250, { force: message.forceRefresh !== false });
+  requestSyncRefresh("remote", 250);
 }
 
 function notifyDataChanged(reason = "changed", options = {}) {
@@ -1189,9 +1236,7 @@ function notifyDataChanged(reason = "changed", options = {}) {
 
 function requestSyncRefresh(reason = "sync", delay = 1200, options = {}) {
   state.pendingSyncReason = reason;
-  const staleSourceRefresh = ["focus", "pageshow", "visible", "full-timer", "source-stale", "sync-retry"].includes(reason)
-    && isSourceSnapshotStale();
-  state.pendingSyncForce = Boolean(state.pendingSyncForce || options.force || staleSourceRefresh);
+  state.pendingSyncForce = Boolean(state.pendingSyncForce || options.force);
   window.clearTimeout(state.syncTimer);
   state.syncTimer = window.setTimeout(() => {
     if (isAutoSyncBusy()) {
@@ -1206,7 +1251,7 @@ function requestSyncRefresh(reason = "sync", delay = 1200, options = {}) {
 
 function refreshAfterLocalMutation(reason = "changed", delay = 800) {
   notifyDataChanged(reason, { forceRefresh: true });
-  requestSyncRefresh(reason, delay, { force: true });
+  requestSyncRefresh(reason, delay);
 }
 
 async function checkSyncStatus() {
@@ -1228,7 +1273,7 @@ async function checkSyncStatus() {
     }
     renderConnection();
     if (isSourceSnapshotStale() && !isAutoSyncBusy() && document.visibilityState === "visible") {
-      requestSyncRefresh("source-stale", 100, { force: true });
+      requestSyncRefresh("source-stale", 100);
     }
     if (!status.version) return;
     if (!state.syncVersion) {
@@ -1239,7 +1284,7 @@ async function checkSyncStatus() {
     if (status.version !== state.syncVersion) {
       state.syncVersion = status.version;
       state.syncChangedAt = status.changedAt || "";
-      requestSyncRefresh("server-version", 100, { force: true });
+      requestSyncRefresh("server-version", 100);
     }
   } catch {
     // The regular full refresh path will surface connection errors when needed.
@@ -1350,7 +1395,7 @@ function scheduleSyncRetry() {
   if (state.syncRetryTimer || document.visibilityState !== "visible") return;
   state.syncRetryTimer = window.setTimeout(() => {
     state.syncRetryTimer = null;
-    requestSyncRefresh("sync-retry", 100, { force: true });
+    requestSyncRefresh("sync-retry", 100);
   }, SYNC_RETRY_INTERVAL_MS);
 }
 
@@ -2434,6 +2479,11 @@ function activeQuickFilterTaskIds(filter, tasks = state.tasks) {
 }
 
 function projectReviewReport() {
+  const signature = derivedDataSignature();
+  if (derivedDataSignaturesEqual(signature, projectReviewReportMemoSignature)) {
+    return projectReviewReportMemoValue;
+  }
+
   const groups = projectReviewGroups();
   const similar = withReviewPriority(
     filterReviewIgnored("similar", similarProjectCandidates(groups)),
@@ -2460,7 +2510,10 @@ function projectReviewReport() {
     .map((group) => reviewGroupWithPriority(group, "completed", groups))
     .sort(reviewPrioritySort);
 
-  return { similar, uploadOnly, missingUpload, completed };
+  const report = { similar, uploadOnly, missingUpload, completed };
+  projectReviewReportMemoSignature = signature;
+  projectReviewReportMemoValue = report;
+  return report;
 }
 
 function defaultHiddenProjectGroups(tasks = state.tasks) {
@@ -4144,7 +4197,7 @@ function renderRows(rows, criticalTaskIds) {
       }
 
       return `
-        <div class="task-row group-row ${row.kind}${issue}${dependencyConflict}${workloadConflict}${reordering}${leaf}${row.hiddenOnly ? " is-readonly" : ""}" data-row-id="${escapeHtml(row.id)}" data-model-row-id="${escapeHtml(row.id)}" style="--task-color:${row.color};--progress:${row.progress}%">
+        <div class="task-row group-row ${row.kind}${selected}${issue}${dependencyConflict}${workloadConflict}${reordering}${leaf}${row.hiddenOnly ? " is-readonly" : ""}" data-row-id="${escapeHtml(row.id)}" data-model-row-id="${escapeHtml(row.id)}" style="--task-color:${row.color};--progress:${row.progress}%">
           <span class="task-main level-${row.kind}">
             <span class="group-caret">${row.collapsed ? "▸" : "▾"}</span>
             <span class="task-text">
@@ -5265,7 +5318,7 @@ function openRowContext(event, row, date = "") {
     restoreActions,
     date,
   };
-  render();
+  renderSelectionOnly();
   showContextMenu(event.clientX, event.clientY, {
     summary: contextSummary(state.context) || state.context.summary || row.title,
     canCreate: !useSelection && (Boolean(date) || ["channel", "project"].includes(row.kind)) && (!row.hiddenOnly || row.kind === "channel"),
@@ -7698,7 +7751,7 @@ function selectRow(row, event = {}, options = {}) {
   if (event.shiftKey && state.selectionAnchorRowId) {
     const ids = taskIdsInRowRange(state.selectionAnchorRowId, row.id);
     applySelection(ids, row.id, ids.length === 1 && row.kind === "task");
-    render();
+    renderSelectionOnly();
     if (shouldFocusTimeline) scheduleSelectedRangeFocus(rowTaskIds, { center: true });
     return;
   }
@@ -7712,13 +7765,13 @@ function selectRow(row, event = {}, options = {}) {
     });
     state.selectionAnchorRowId = row.id;
     applySelection([...next], row.id, next.size === 1);
-    render();
+    renderSelectionOnly();
     if (shouldFocusTimeline) scheduleSelectedRangeFocus(rowTaskIds, { center: true });
     return;
   }
 
   applySelection(rowTaskIds, row.id, row.kind === "task" && rowTaskIds.length === 1);
-  render();
+  renderSelectionOnly();
   if (shouldFocusTimeline) scheduleSelectedRangeFocus(rowTaskIds);
 }
 
@@ -7950,7 +8003,7 @@ function focusSearchResult(direction = 1) {
   const rowTaskIds = taskIdsForRow(row);
   state.searchFocusIndex = nextIndex;
   applySelection(rowTaskIds, row.id, row.kind === "task" && rowTaskIds.length === 1);
-  render();
+  renderSelectionOnly();
   scheduleRowFocus(row.id, { center: true, smooth: true });
   showToast(`${nextIndex + 1}/${rows.length} 검색 결과로 이동했습니다.`);
 }
@@ -8042,6 +8095,28 @@ function rowSelectionClass(row) {
   return selectedCount === ids.length ? " is-selected" : " is-partial-selected";
 }
 
+function refreshRowSelectionClasses() {
+  const rowsById = new Map(state.rows.map((row) => [row.id, row]));
+  const refreshElement = (element) => {
+    const rowId = element.dataset.modelRowId || element.dataset.rowId || "";
+    const selectionClass = rowSelectionClass(rowsById.get(rowId));
+    element.classList.toggle("is-selected", selectionClass === " is-selected");
+    element.classList.toggle("is-partial-selected", selectionClass === " is-partial-selected");
+  };
+
+  els.taskTable
+    .querySelectorAll(".task-row[data-row-id], .task-row[data-model-row-id]")
+    .forEach(refreshElement);
+  els.barLayer.querySelectorAll(".gantt-bar[data-row-id]").forEach(refreshElement);
+}
+
+function renderSelectionOnly() {
+  refreshRowSelectionClasses();
+  renderSelectionBar();
+  renderUndoButton();
+  syncEditor();
+}
+
 function startSelectionDrag(event, area) {
   if (event.button !== 0 || state.panMode || state.panDrag || state.drag || state.dependencyDrag || state.rowReorderDrag || state.createDrag || state.timelineNavigatorDrag) return;
   if (area === "timeline" && shouldPanEmptyTimeline(event)) {
@@ -8089,7 +8164,7 @@ function moveSelectionDrag(event) {
   const ids = new Set(drag.baseIds);
   collectTaskIdsInRect(rect).forEach((id) => ids.add(id));
   applySelection([...ids], "", false);
-  render();
+  renderSelectionOnly();
   updateSelectionBox(rect);
 }
 
@@ -8104,7 +8179,7 @@ function endSelectionDrag(event) {
   const ids = new Set(drag.baseIds);
   collectTaskIdsInRect(rect).forEach((id) => ids.add(id));
   applySelection([...ids], "", ids.size === 1);
-  render();
+  renderSelectionOnly();
   scheduleSelectedRangeFocus([...ids], { center: true });
   setTimeout(() => {
     state.suppressClick = false;
@@ -8275,7 +8350,7 @@ function selectTask(id) {
     return;
   }
   applySelection([id], id, true);
-  render();
+  renderSelectionOnly();
   scheduleSelectedRangeFocus([id], { center: true });
 }
 
@@ -8313,7 +8388,7 @@ function clearSelection(shouldRender = true) {
   state.editorMode = "task";
   state.editorRowId = "";
   hideContextMenu();
-  if (shouldRender) render();
+  if (shouldRender) renderSelectionOnly();
 }
 
 function renderSelectionBar() {
@@ -10923,6 +10998,7 @@ function selectReviewSection(kind) {
     return;
   }
 
+  const needsFullRender = kind === "completed" && !state.showCompleted;
   if (kind === "completed") {
     state.showCompleted = true;
     els.completedToggleButton.classList.add("is-active");
@@ -10930,7 +11006,8 @@ function selectReviewSection(kind) {
 
   closeReviewPanel();
   applySelection(ids, "", ids.length === 1);
-  render();
+  if (needsFullRender) render();
+  else renderSelectionOnly();
   scheduleSelectedRangeFocus(ids, { center: true });
   showToast(`${reviewKindLabel(kind)} ${groups.length}개 프로젝트를 선택했습니다.`);
 }
@@ -10977,14 +11054,17 @@ function selectReviewGroup(key) {
     showToast("선택할 일정이 없습니다.");
     return;
   }
-  if (isCompletedUploadProject(group.tasks)) {
+  const isCompletedGroup = isCompletedUploadProject(group.tasks);
+  const needsFullRender = isCompletedGroup && !state.showCompleted;
+  if (isCompletedGroup) {
     state.showCompleted = true;
     els.completedToggleButton.classList.add("is-active");
   }
   closeReviewPanel();
   const ids = group.tasks.map((task) => task.id);
   applySelection(ids, "", group.tasks.length === 1);
-  render();
+  if (needsFullRender) render();
+  else renderSelectionOnly();
   scheduleSelectedRangeFocus(ids, { center: true });
   showToast(`"${group.project}" ${group.tasks.length}개 일정을 선택했습니다.`);
 }
