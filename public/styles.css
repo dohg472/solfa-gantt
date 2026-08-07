@@ -536,24 +536,18 @@ button.ops-summary-chip.is-active {
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) var(--sidebar-width);
+  grid-template-columns: minmax(0, 1fr);
 }
 
-@media (max-width: 1020px) {
-  .layout {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .editor {
-    position: fixed;
-    top: 0;
-    right: 0;
-    bottom: 0;
-    z-index: 950;
-    width: min(400px, calc(100vw - 24px));
-    border-left: 1px solid var(--line);
-    box-shadow: -12px 0 32px rgba(15, 15, 15, 0.14);
-  }
+.editor {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 950;
+  width: min(400px, calc(100vw - 24px));
+  border-left: 1px solid var(--line);
+  box-shadow: -12px 0 32px rgba(15, 15, 15, 0.14);
 }
 
 .layout.editor-closed {
@@ -3457,19 +3451,6 @@ body.is-dragging .gantt-bar.task .bar-handle::after {
   .toolbar-primary {
     justify-content: flex-start;
     flex-wrap: wrap;
-  }
-
-  .editor {
-    position: fixed;
-    right: 12px;
-    top: 88px;
-    bottom: 12px;
-    z-index: 12;
-    width: min(340px, calc(100vw - 24px));
-    height: auto;
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    box-shadow: 0 18px 50px rgba(32, 33, 36, 0.18);
   }
 
   .impact-item {
