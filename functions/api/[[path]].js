@@ -1368,6 +1368,7 @@ async function getGanttAttachmentMedia(env, pageId) {
     kind: /^image\//i.test(item.type || "") ? "image" : "file",
     url: `/api/attachments/${item.id}`,
     label: item.name || "파일",
+    mime: item.type || "",
     ganttOnly: true,
   }));
 }

@@ -311,6 +311,12 @@ const els = {
   planAttachButton: document.getElementById("planAttachButton"),
   planAttachInput: document.getElementById("planAttachInput"),
   planAttachStatus: document.getElementById("planAttachStatus"),
+  filePreviewModal: document.getElementById("filePreviewModal"),
+  filePreviewName: document.getElementById("filePreviewName"),
+  filePreviewOpenTab: document.getElementById("filePreviewOpenTab"),
+  filePreviewDownload: document.getElementById("filePreviewDownload"),
+  filePreviewClose: document.getElementById("filePreviewClose"),
+  filePreviewBody: document.getElementById("filePreviewBody"),
   startField: document.getElementById("startField"),
   endField: document.getElementById("endField"),
   statusField: document.getElementById("statusField"),
@@ -490,6 +496,17 @@ function bindEvents() {
   });
   els.planAttachButton?.addEventListener("click", () => els.planAttachInput?.click());
   els.planAttachInput?.addEventListener("change", handlePlanAttachChange);
+  [els.planContent, els.descriptionField].forEach((target) => {
+    target?.addEventListener("dragenter", handlePlanAttachmentDragOver);
+    target?.addEventListener("dragover", handlePlanAttachmentDragOver);
+    target?.addEventListener("dragleave", handlePlanAttachmentDragLeave);
+    target?.addEventListener("drop", handlePlanAttachmentDrop);
+  });
+  window.addEventListener("dragover", preventEditorFileDropNavigation);
+  window.addEventListener("drop", preventEditorFileDropNavigation);
+  document.querySelectorAll("[data-file-preview-close]").forEach((target) => {
+    target.addEventListener("click", closeFilePreview);
+  });
   els.todayButton.addEventListener("click", scrollToToday);
   els.collapseAllButton.addEventListener("click", collapseAllGroups);
   els.expandAllButton.addEventListener("click", expandAllGroups);
@@ -738,6 +755,11 @@ function handleEscapeCancel(event) {
   const hadEditor = state.editorOpen;
   const hadSelection = Boolean(state.selectedIds.size || state.selectedId || state.selectionAnchorRowId);
 
+  if (els.filePreviewModal && !els.filePreviewModal.hidden) {
+    markHandled();
+    closeFilePreview();
+    return true;
+  }
   if (state.panMode) {
     markHandled();
     setPanMode(false);
@@ -12069,6 +12091,11 @@ function renderTaskSourceContent(pageId, result) {
     link.href = href;
     link.target = "_blank";
     link.rel = "noopener";
+    link.addEventListener("click", (event) => {
+      if (event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey) return;
+      event.preventDefault();
+      openFilePreview({ href, label: item.label, mime: item.mime || "" });
+    });
     if (item.kind === "image") {
       link.className = "plan-image-link";
       const image = document.createElement("img");
@@ -12160,14 +12187,20 @@ async function handlePlanAttachChange() {
   const file = els.planAttachInput?.files?.[0];
   if (els.planAttachInput) els.planAttachInput.value = "";
   if (!file) return;
+  await uploadPlanAttachment(file);
+}
+
+async function uploadPlanAttachment(file) {
   const pageId = els.planContent?.dataset.pageId || "";
   if (!pageId) return;
-  if (file.size > 20 * 1024 * 1024) {
-    els.planAttachStatus.textContent = "20MB 이하만 업로드할 수 있습니다.";
+  if (file.size > 15 * 1024 * 1024) {
+    els.planAttachStatus.textContent = "15MB 이하만 업로드할 수 있습니다.";
     return;
   }
   els.planAttachButton.disabled = true;
-  els.planAttachStatus.textContent = "업로드 중…";
+  if (!/^업로드 중… \(\d+\/\d+\)$/.test(els.planAttachStatus.textContent)) {
+    els.planAttachStatus.textContent = "업로드 중…";
+  }
   try {
     const form = new FormData();
     form.append("file", file, file.name);
@@ -12189,6 +12222,98 @@ async function handlePlanAttachChange() {
   } finally {
     els.planAttachButton.disabled = false;
   }
+}
+
+function isFileDrag(event) {
+  return Boolean(event.dataTransfer?.types?.includes("Files"));
+}
+
+function handlePlanAttachmentDragOver(event) {
+  if (!isFileDrag(event)) return;
+  event.preventDefault();
+  els.planContent?.classList.add("is-dropping");
+}
+
+function handlePlanAttachmentDragLeave() {
+  els.planContent?.classList.remove("is-dropping");
+}
+
+async function handlePlanAttachmentDrop(event) {
+  els.planContent?.classList.remove("is-dropping");
+  if (!isFileDrag(event)) return;
+  event.preventDefault();
+  if (els.planContent?.hidden || !els.planContent?.dataset.pageId) return;
+  const files = Array.from(event.dataTransfer?.files || []);
+  for (let index = 0; index < files.length; index += 1) {
+    els.planAttachStatus.textContent = `업로드 중… (${index + 1}/${files.length})`;
+    await uploadPlanAttachment(files[index]);
+  }
+}
+
+function preventEditorFileDropNavigation(event) {
+  if (!state.editorOpen || !isFileDrag(event)) return;
+  event.preventDefault();
+}
+
+function closeFilePreview() {
+  if (!els.filePreviewModal) return;
+  els.filePreviewModal.hidden = true;
+  els.filePreviewBody?.replaceChildren();
+}
+
+function openFilePreview({ href, label, mime }) {
+  if (!els.filePreviewModal || !els.filePreviewBody) return;
+  const fileLabel = String(label || "파일");
+  const mimeType = String(mime || "").toLowerCase();
+  const extensionSources = [fileLabel, href].map((value) => String(value || "").split(/[?#]/)[0].toLowerCase());
+  const hasExtension = (pattern) => extensionSources.some((value) => pattern.test(value));
+  let kind = "unknown";
+  if (mimeType) {
+    if (mimeType.startsWith("image/")) kind = "image";
+    else if (mimeType === "application/pdf") kind = "pdf";
+    else if (mimeType.startsWith("video/")) kind = "video";
+    else if (mimeType.startsWith("audio/")) kind = "audio";
+  } else if (hasExtension(/\.(?:png|jpe?g|gif|webp|heic|svg|avif)$/i)) {
+    kind = "image";
+  } else if (hasExtension(/\.pdf$/i)) {
+    kind = "pdf";
+  } else if (hasExtension(/\.(?:mp4|mov|webm|m4v)$/i)) {
+    kind = "video";
+  } else if (hasExtension(/\.(?:mp3|wav|m4a|aac|ogg)$/i)) {
+    kind = "audio";
+  }
+
+  let preview;
+  if (kind === "image") {
+    preview = document.createElement("img");
+    preview.src = href;
+    preview.alt = fileLabel;
+  } else if (kind === "pdf") {
+    preview = document.createElement("iframe");
+    preview.src = href;
+    preview.title = fileLabel;
+  } else if (kind === "video") {
+    preview = document.createElement("video");
+    preview.src = href;
+    preview.controls = true;
+    preview.autoplay = true;
+    preview.muted = true;
+  } else if (kind === "audio") {
+    preview = document.createElement("audio");
+    preview.src = href;
+    preview.controls = true;
+  } else {
+    preview = document.createElement("div");
+    preview.className = "file-preview-empty";
+    preview.textContent = "미리보기를 지원하지 않는 형식입니다. 다운로드해서 확인해주세요.";
+  }
+
+  els.filePreviewName.textContent = fileLabel;
+  els.filePreviewOpenTab.href = href;
+  els.filePreviewDownload.href = href;
+  els.filePreviewDownload.download = fileLabel;
+  els.filePreviewBody.replaceChildren(preview);
+  els.filePreviewModal.hidden = false;
 }
 
 function editorGroupRow() {

@@ -4,8 +4,8 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>솔파 간트</title>
-    <link rel="stylesheet" href="/styles.css?v=20260807-live-oneoff" />
-    <script src="/app.js?v=20260807-live-oneoff" defer></script>
+    <link rel="stylesheet" href="/styles.css?v=20260807-file-preview" />
+    <script src="/app.js?v=20260807-file-preview" defer></script>
   </head>
   <body>
     <div class="app">
@@ -494,6 +494,20 @@
           </div>
         </form>
       </section>
+      <div id="filePreviewModal" class="file-preview-modal" hidden>
+        <div class="file-preview-backdrop" data-file-preview-close></div>
+        <div class="file-preview-panel" role="dialog" aria-modal="true" aria-label="파일 미리보기">
+          <div class="file-preview-head">
+            <span id="filePreviewName" class="file-preview-name"></span>
+            <div class="file-preview-actions">
+              <a id="filePreviewOpenTab" class="ghost-button compact-button" target="_blank" rel="noopener">새 탭</a>
+              <a id="filePreviewDownload" class="ghost-button compact-button" download>다운로드</a>
+              <button id="filePreviewClose" class="ghost-button compact-button" type="button" data-file-preview-close>닫기</button>
+            </div>
+          </div>
+          <div id="filePreviewBody" class="file-preview-body"></div>
+        </div>
+      </div>
       <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
     </div>
   </body>
