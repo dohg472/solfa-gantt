@@ -3146,6 +3146,31 @@ const GENERIC_PROJECT_TOKENS = new Set([
   "영상", "콘텐츠", "건", "본편", "full", "ver",
 ]);
 
+function tokensRoughlyEqual(a, b) {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  if (a.length < 3 || b.length < 3) return false;
+  if (Math.abs(a.length - b.length) > 1) return false;
+  if (a.length === b.length) {
+    let diff = 0;
+    for (let i = 0; i < a.length; i += 1) {
+      if (a[i] !== b[i] && ++diff > 1) return false;
+    }
+    return true;
+  }
+  const [shorter, longer] = a.length < b.length ? [a, b] : [b, a];
+  let i = 0;
+  let j = 0;
+  let skipped = false;
+  while (i < shorter.length && j < longer.length) {
+    if (shorter[i] === longer[j]) { i += 1; j += 1; continue; }
+    if (skipped) return false;
+    skipped = true;
+    j += 1;
+  }
+  return true;
+}
+
 function distinctiveProjectTokens(name) {
   const cleaned = String(name || "")
     .replace(/\[[^\]]*\]/g, " ")
@@ -3168,7 +3193,7 @@ function sharesDistinctiveTokenContainment(nameA, nameB) {
   if (!tokensA.size || !tokensB.size) return false;
   const [smaller, larger] = tokensA.size <= tokensB.size ? [tokensA, tokensB] : [tokensB, tokensA];
   for (const token of smaller) {
-    if (!larger.has(token)) return false;
+    if (![...larger].some((candidate) => tokensRoughlyEqual(token, candidate))) return false;
   }
   return true;
 }
@@ -3178,7 +3203,9 @@ function sharedDistinctiveTokens(nameA, nameB, minLength = 2) {
   const tokensB = distinctiveProjectTokens(nameB);
   const shared = [];
   for (const token of tokensA) {
-    if (token.length >= minLength && tokensB.has(token)) shared.push(token);
+    if (token.length >= minLength && [...tokensB].some((candidate) => tokensRoughlyEqual(token, candidate))) {
+      shared.push(token);
+    }
   }
   return shared;
 }
