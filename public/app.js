@@ -12261,14 +12261,16 @@ function closeFilePreview() {
   els.filePreviewBody?.replaceChildren();
 }
 
-function openFilePreview({ href, label, mime }) {
+async function openFilePreview({ href, label, mime }) {
   if (!els.filePreviewModal || !els.filePreviewBody) return;
   const fileLabel = String(label || "파일");
   const mimeType = String(mime || "").toLowerCase();
   const extensionSources = [fileLabel, href].map((value) => String(value || "").split(/[?#]/)[0].toLowerCase());
   const hasExtension = (pattern) => extensionSources.some((value) => pattern.test(value));
   let kind = "unknown";
-  if (mimeType) {
+  if (hasExtension(/\.(?:doc|docx|xls|xlsx|ppt|pptx)$/i)) {
+    kind = "office";
+  } else if (mimeType) {
     if (mimeType.startsWith("image/")) kind = "image";
     else if (mimeType === "application/pdf") kind = "pdf";
     else if (mimeType.startsWith("video/")) kind = "video";
@@ -12302,6 +12304,10 @@ function openFilePreview({ href, label, mime }) {
     preview = document.createElement("audio");
     preview.src = href;
     preview.controls = true;
+  } else if (kind === "office") {
+    preview = document.createElement("div");
+    preview.className = "file-preview-empty";
+    preview.textContent = "문서 뷰어 불러오는 중…";
   } else {
     preview = document.createElement("div");
     preview.className = "file-preview-empty";
@@ -12314,6 +12320,38 @@ function openFilePreview({ href, label, mime }) {
   els.filePreviewDownload.download = fileLabel;
   els.filePreviewBody.replaceChildren(preview);
   els.filePreviewModal.hidden = false;
+
+  if (kind === "office") {
+    try {
+      let publicUrl = href;
+      const sourceUrl = new URL(href, window.location.origin);
+      const isRelativeAttachment = String(href || "").startsWith("/api/attachments/");
+      const isOwnAttachment = sourceUrl.origin === window.location.origin
+        && sourceUrl.pathname.startsWith("/api/attachments/");
+      const attachmentMatch = (isRelativeAttachment || isOwnAttachment)
+        ? sourceUrl.pathname.match(/^\/api\/attachments\/([0-9a-f-]+)$/)
+        : null;
+      if (attachmentMatch) {
+        const response = await fetch(apiUrl(`/api/attachments/${attachmentMatch[1]}/link`));
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const payload = await response.json();
+        publicUrl = String(payload?.url || "").trim();
+        if (!publicUrl) throw new Error("Missing signed attachment URL");
+      }
+
+      if (!els.filePreviewBody.contains(preview)) return;
+      const iframe = document.createElement("iframe");
+      iframe.src = `https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(publicUrl)}`;
+      iframe.title = fileLabel;
+      els.filePreviewBody.replaceChildren(iframe);
+    } catch {
+      if (!els.filePreviewBody.contains(preview)) return;
+      const fallback = document.createElement("div");
+      fallback.className = "file-preview-empty";
+      fallback.textContent = "미리보기를 지원하지 않는 형식입니다. 다운로드해서 확인해주세요.";
+      els.filePreviewBody.replaceChildren(fallback);
+    }
+  }
 }
 
 function editorGroupRow() {

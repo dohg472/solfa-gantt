@@ -88,7 +88,7 @@ async function route({ request, env, waitUntil }) {
 
   if (request.method === "OPTIONS") return empty(204);
 
-  if (!hasApiAccess(request, url, env)) {
+  if (!hasApiAccess(request, url, env) && !(await hasSignedAttachmentAccess(request, url, path, env))) {
     return json({ error: "임베드 접근 키가 필요합니다." }, 401);
   }
 
@@ -116,6 +116,15 @@ async function route({ request, env, waitUntil }) {
   const taskContentMatch = path.match(/^\/tasks\/(.+)\/content$/);
   if (taskContentMatch && request.method === "GET") {
     return json(await getTaskPageContent(env, decodeURIComponent(taskContentMatch[1])));
+  }
+
+  const attachmentLinkMatch = path.match(/^\/attachments\/([0-9a-f-]+)\/link$/);
+  if (attachmentLinkMatch && request.method === "GET") {
+    const attachmentId = attachmentLinkMatch[1];
+    const exp = Date.now() + 30 * 60 * 1000;
+    const sig = await attachmentSignature(env, attachmentId, exp);
+    const origin = new URL(request.url).origin;
+    return json({ url: `${origin}/api/attachments/${attachmentId}?exp=${exp}&sig=${sig}` });
   }
 
   const attachmentMatch = path.match(/^\/attachments\/([0-9a-f-]+)$/);
@@ -1744,6 +1753,27 @@ function embedInfo(request, env) {
     requiresEnvPublicUrl: false,
     message: "Cloudflare Pages 고정 주소로 노션 임베드에 사용할 수 있습니다.",
   };
+}
+
+async function attachmentSignature(env, attachmentId, exp) {
+  const secret = envValue(env, "APP_EMBED_KEY") || "solpa";
+  const keyData = new TextEncoder().encode(secret);
+  const cryptoKey = await crypto.subtle.importKey("raw", keyData, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const payload = new TextEncoder().encode(`${attachmentId}:${exp}`);
+  const signature = await crypto.subtle.sign("HMAC", cryptoKey, payload);
+  return [...new Uint8Array(signature)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+async function hasSignedAttachmentAccess(request, url, path, env) {
+  if (request.method !== "GET") return false;
+  const match = path.match(/^\/attachments\/([0-9a-f-]+)$/);
+  if (!match) return false;
+  const expValue = url.searchParams.get("exp");
+  const sig = url.searchParams.get("sig") || "";
+  if (!expValue || !sig) return false;
+  const exp = Number(expValue);
+  if (!Number.isFinite(exp) || exp <= Date.now()) return false;
+  return sig === await attachmentSignature(env, match[1], exp);
 }
 
 function hasApiAccess(request, url, env) {
