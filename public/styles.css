@@ -539,6 +539,23 @@ button.ops-summary-chip.is-active {
   grid-template-columns: minmax(0, 1fr) var(--sidebar-width);
 }
 
+@media (max-width: 1020px) {
+  .layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .editor {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 950;
+    width: min(400px, calc(100vw - 24px));
+    border-left: 1px solid var(--line);
+    box-shadow: -12px 0 32px rgba(15, 15, 15, 0.14);
+  }
+}
+
 .layout.editor-closed {
   grid-template-columns: minmax(0, 1fr);
 }
