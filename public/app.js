@@ -668,6 +668,7 @@ function bindEvents() {
   els.hiddenRestoreList.addEventListener("change", syncHiddenRestoreSelectionState);
   els.hiddenRestoreForm.addEventListener("submit", submitHiddenRestoreSelection);
   els.taskTable.addEventListener("pointerdown", (event) => startSelectionDrag(event, "table"));
+  els.taskTable.addEventListener("click", recoverRetargetedTaskTableClick);
   els.taskTable.addEventListener("pointerover", handleRowHoverStart);
   els.taskTable.addEventListener("pointerout", handleRowHoverEnd);
   els.tableResizeHandle.addEventListener("pointerdown", startTableResize);
@@ -4551,6 +4552,40 @@ function handleRowHoverEnd(event) {
 function hoveredRowIdFromTarget(target) {
   const element = target?.closest?.("[data-model-row-id], .gantt-bar[data-row-id]");
   return element?.dataset?.modelRowId || element?.dataset?.rowId || "";
+}
+
+function recoverRetargetedTaskTableClick(event) {
+  // Some embedded Chromium builds retarget a captured pointer's click to the table.
+  if (event.target !== els.taskTable || state.suppressClick) return;
+  const element = taskTableRowAtPoint(event.clientX, event.clientY);
+  if (!element) return;
+  const rowId = element.dataset.modelRowId || element.dataset.taskId || element.dataset.rowId || "";
+  const row = state.rows.find((item) => item.id === rowId);
+  if (!row) return;
+
+  selectRow(row, event, { focusTimeline: row.kind === "task" });
+  if (["channel", "project"].includes(row.kind) && !isSelectionModifier(event)) {
+    openGroupEditor(row);
+  }
+  void sendClickDebug({
+    type: "task-table-click-recovered",
+    isGroupRow: row.kind !== "task",
+    rowId: rowId.slice(0, 8),
+  });
+}
+
+function taskTableRowAtPoint(clientX, clientY) {
+  const rows = [...els.taskTable.querySelectorAll(".task-row")];
+  const directMatch = rows.find((element) => {
+    const rect = element.getBoundingClientRect();
+    return clientX >= rect.left && clientX < rect.right && clientY >= rect.top && clientY < rect.bottom;
+  });
+  if (directMatch) return directMatch;
+
+  const tableRect = els.taskTable.getBoundingClientRect();
+  if (clientX < tableRect.left || clientX >= tableRect.right || clientY < tableRect.top || clientY >= tableRect.bottom) return null;
+  const index = Math.floor((clientY - tableRect.top) / currentRowHeight());
+  return rows[index] || null;
 }
 
 function setHoveredRow(rowId = "") {
@@ -8805,8 +8840,10 @@ function startSelectionDrag(event, area) {
     startY: event.clientY,
     baseIds: event.shiftKey || event.ctrlKey || event.metaKey ? new Set(state.selectedIds) : new Set(),
     moved: false,
+    captureTarget: event.currentTarget,
+    pointerId: event.pointerId,
   };
-  event.currentTarget.setPointerCapture?.(event.pointerId);
+  // Capture only after the drag threshold so an ordinary row click keeps the row as its target.
   window.addEventListener("pointermove", moveSelectionDrag);
   window.addEventListener("pointerup", endSelectionDrag, { once: true });
 }
@@ -8824,6 +8861,13 @@ function moveSelectionDrag(event) {
   if (!drag.moved && distance < 6) return;
 
   event.preventDefault();
+  if (!drag.moved) {
+    try {
+      drag.captureTarget?.setPointerCapture?.(drag.pointerId);
+    } catch {
+      // Window listeners still keep selection dragging usable in embedded browsers that reject pointer capture.
+    }
+  }
   drag.moved = true;
   state.suppressClick = true;
   const rect = selectionRect(drag.startX, drag.startY, event.clientX, event.clientY);
@@ -8839,6 +8883,13 @@ function moveSelectionDrag(event) {
 function endSelectionDrag(event) {
   window.removeEventListener("pointermove", moveSelectionDrag);
   const drag = state.selectionDrag;
+  try {
+    if (drag?.captureTarget?.hasPointerCapture?.(drag.pointerId)) {
+      drag.captureTarget.releasePointerCapture?.(drag.pointerId);
+    }
+  } catch {
+    // Pointer capture may already have been released implicitly on pointerup.
+  }
   state.selectionDrag = null;
   els.selectionBox.hidden = true;
   if (!drag?.moved) return;
