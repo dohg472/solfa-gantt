@@ -2263,6 +2263,7 @@ function isCompletedUploadProject(tasks) {
   return !tasks.some((task) =>
     compareDate(task.end, latestUploadEnd) > 0 &&
     !isDoneTask(task) &&
+    !(isLiveOneOffTask(task) && compareDate(task.end, todayString()) < 0) &&
     !(isProductionTask(task) && daysBetween(task.end, todayString()) >= MISSING_UPLOAD_STALE_DAYS)
   );
 }
@@ -2354,7 +2355,7 @@ function isMissingUploadProject(tasks) {
     tasks?.length &&
     !tasks.some(isUploadTask) &&
     tasks.some(isProductionTask) &&
-    !tasks.every(isNonDeliverableTask)
+    !tasks.every((task) => isLiveOneOffTask(task) || isNonDeliverableTask(task))
   );
 }
 
@@ -2371,6 +2372,17 @@ function isPastProductionOnlyProject(tasks) {
   if (!tasks.every(isProductionTask)) return false;
   if (tasks.some(isActiveTask)) return false;
   return compareDate(rangeOf(tasks).end, todayString()) < 0;
+}
+
+function isPastLiveOnlyProject(tasks) {
+  const list = tasks || [];
+  if (!list.length || list.some(isUploadTask)) return false;
+  if (!list.some(isLiveOneOffTask)) return false;
+  if (!list.every((task) => isLiveOneOffTask(task) || isNonDeliverableTask(task))) return false;
+  if (list.some(isActiveTask)) return false;
+  const latestEnd = latestEndForTasks(list);
+  if (!latestEnd || compareDate(latestEnd, todayString()) >= 0) return false;
+  return daysBetween(latestEnd, todayString()) > COMPLETED_HIDE_GRACE_DAYS;
 }
 
 function isPastFinishedProject(tasks) {
@@ -2390,6 +2402,12 @@ function isProductionTask(task) {
 function isNonDeliverableTask(task) {
   const text = [task.detail, task.category, task.title, task.project].filter(Boolean).join(" ");
   return /미팅|회의|사전\s*인터뷰|사전인터뷰|답사|레퍼런스|세팅|기획|기획안|구성안|섭외|섭외리스트|가이드|컨셉|휴가|휴재|휴방|연차|반차|회식|워크숍|워크샵/i.test(text);
+}
+
+function isLiveOneOffTask(task) {
+  if (!isProductionTask(task)) return false;
+  const text = [task.detail, task.category, task.title, task.project].filter(Boolean).join(" ");
+  return /라이브|(?:^|[^a-z])live(?:$|[^a-z])/i.test(text);
 }
 
 function isReviewableTask(task) {
@@ -2507,13 +2525,13 @@ function projectReviewReport() {
     .map((group) => reviewGroupWithPriority(group, "upload-only", groups))
     .sort(reviewPrioritySort);
   const missingUpload = groups
-    .filter((group) => !group.tasks.some(isUploadTask) && group.tasks.some(isProductionTask) && !group.tasks.every(isNonDeliverableTask))
+    .filter((group) => !group.tasks.some(isUploadTask) && group.tasks.some(isProductionTask) && !group.tasks.every((task) => isLiveOneOffTask(task) || isNonDeliverableTask(task)))
     .filter((group) => !similarIssueGroupKeys.has(group.key))
     .filter((group) => !isReviewIgnored("missing-upload", group))
     .map((group) => reviewGroupWithPriority(group, "missing-upload", groups))
     .sort(reviewPrioritySort);
   const completed = groups
-    .filter((group) => !isUploadOnlyProject(group.tasks) && isCompletedUploadProject(group.tasks))
+    .filter((group) => !isUploadOnlyProject(group.tasks) && projectVisibilityState(group.tasks).kind === "completed")
     .filter((group) => !isReviewIgnored("completed", group))
     .map((group) => reviewGroupWithPriority(group, "completed", groups))
     .sort(reviewPrioritySort);
@@ -2652,7 +2670,11 @@ function reviewSignalForGroup(group, kind) {
   }
 
   if (kind === "completed") {
-    return { priority: 20, tone: "done", reason: "업로드까지 완료되어 기본 숨김" };
+    return {
+      priority: 20,
+      tone: "done",
+      reason: isPastLiveOnlyProject(group.tasks || []) ? "라이브가 끝나 업로드 없이 기본 숨김" : "업로드까지 완료되어 기본 숨김",
+    };
   }
 
   return { priority: 0, tone: "medium", reason: "검토 필요" };
@@ -3500,6 +3522,17 @@ function projectVisibilityState(tasks) {
       label: "업로드 완료",
       tone: "ok",
       reason: `업로드가 ${dateLabel(latestUploadEnd)}에 끝나 2일 뒤부터 기본 숨김 대상입니다`,
+      hiddenByDefault: true,
+      composition,
+    };
+  }
+
+  if (isPastLiveOnlyProject(list)) {
+    return {
+      kind: "completed",
+      label: "라이브 완료",
+      tone: "ok",
+      reason: `라이브가 ${dateLabel(latestEnd)}에 끝나 업로드 없이 완결되는 일정입니다`,
       hiddenByDefault: true,
       composition,
     };
@@ -9797,7 +9830,7 @@ function operationActionItems({ diagnostics, report, fixedEmbed, urgentReviewCou
     {
       action: "hide-completed",
       title: "완료 프로젝트 숨김",
-      detail: completedCount ? `업로드 완료 ${completedCount}개 프로젝트` : "완료 숨김 대상 없음",
+      detail: completedCount ? `완료 ${completedCount}개 프로젝트` : "완료 숨김 대상 없음",
       button: "숨김",
       tone: completedCount ? "warn" : "ok",
       disabled: !completedCount,
