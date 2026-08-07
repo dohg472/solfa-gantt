@@ -4370,7 +4370,7 @@ function renderRows(rows, criticalTaskIds) {
   els.taskTable.querySelectorAll("[data-task-id]").forEach((row) => {
     const editableName = row.querySelector("[data-inline-edit]");
     editableName?.addEventListener("click", (event) => {
-      event.stopPropagation();
+      if (event.target.closest("input")) event.stopPropagation();
     });
     editableName?.addEventListener("dblclick", (event) => {
       const model = state.rows.find((item) => item.id === row.dataset.taskId);
@@ -4378,7 +4378,7 @@ function renderRows(rows, criticalTaskIds) {
     });
     const editableRange = row.querySelector("[data-range-edit]");
     editableRange?.addEventListener("click", (event) => {
-      event.stopPropagation();
+      if (event.target.closest("input")) event.stopPropagation();
     });
     editableRange?.addEventListener("dblclick", (event) => {
       const model = state.rows.find((item) => item.id === row.dataset.taskId);
@@ -4386,7 +4386,7 @@ function renderRows(rows, criticalTaskIds) {
     });
     const editableMeta = row.querySelector("[data-meta-edit]");
     editableMeta?.addEventListener("click", (event) => {
-      event.stopPropagation();
+      if (event.target.closest("input")) event.stopPropagation();
     });
     editableMeta?.addEventListener("dblclick", (event) => {
       const model = state.rows.find((item) => item.id === row.dataset.taskId);
@@ -4412,7 +4412,7 @@ function renderRows(rows, criticalTaskIds) {
     });
     const editableName = element.querySelector("[data-inline-edit]");
     editableName?.addEventListener("click", (event) => {
-      event.stopPropagation();
+      if (event.target.closest("input")) event.stopPropagation();
     });
     editableName?.addEventListener("dblclick", (event) => {
       const row = state.rows.find((item) => item.id === element.dataset.rowId);
@@ -4424,7 +4424,7 @@ function renderRows(rows, criticalTaskIds) {
     });
     const editableRange = element.querySelector("[data-range-edit]");
     editableRange?.addEventListener("click", (event) => {
-      event.stopPropagation();
+      if (event.target.closest("input")) event.stopPropagation();
     });
     editableRange?.addEventListener("dblclick", (event) => {
       const row = state.rows.find((item) => item.id === element.dataset.rowId);
@@ -4447,7 +4447,7 @@ function renderRows(rows, criticalTaskIds) {
       const model = state.rows.find((item) => item.id === element.dataset.rowId);
       if (!model) return;
       selectRow(model, event, { focusTimeline: false });
-      if (["channel", "project"].includes(model.kind) && !isSelectionModifier(event) && !event.target.closest("[data-inline-edit], [data-range-edit], button")) {
+      if (["channel", "project"].includes(model.kind) && !isSelectionModifier(event) && !event.target.closest("button, input")) {
         openGroupEditor(model);
       }
     });
