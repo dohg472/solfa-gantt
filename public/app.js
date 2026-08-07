@@ -1169,6 +1169,16 @@ function renderSearchControls() {
 }
 
 const APP_ASSET_VERSION = (document.querySelector('script[src*="app.js"]')?.src.match(/[?&]v=([\w-]+)/) || [])[1] || "";
+
+async function sendClickDebug(info) {
+  try {
+    await fetch(apiUrl("/api/debug-log"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...info, version: APP_ASSET_VERSION, at: new Date().toISOString() }),
+    });
+  } catch {}
+}
 let appUpdatePending = false;
 
 async function checkAppVersion() {
@@ -4393,9 +4403,26 @@ function renderRows(rows, criticalTaskIds) {
       if (model) startInlineMetaEdit(event, model);
     });
     row.addEventListener("click", (event) => {
-      if (state.suppressClick) return;
+      const debugInfo = {
+        type: "task-row-click",
+        suppressed: Boolean(state.suppressClick),
+        target: `${event.target.tagName}.${String(event.target.className).split(" ")[0]}`,
+        rowFound: false,
+        editorOpenAfter: null,
+      };
+      if (state.suppressClick) {
+        void sendClickDebug(debugInfo);
+        return;
+      }
       const model = state.rows.find((item) => item.id === row.dataset.taskId);
+      debugInfo.rowFound = Boolean(model);
       if (model) selectRow(model, event);
+      window.setTimeout(() => {
+        debugInfo.editorOpenAfter = state.editorOpen;
+        debugInfo.editorHidden = els.editor.hidden;
+        debugInfo.selectedId = String(state.selectedId || "").slice(0, 8);
+        void sendClickDebug(debugInfo);
+      }, 300);
     });
     row.addEventListener("dblclick", (event) => {
       if (event.target.closest("[data-inline-edit], [data-range-edit], [data-meta-edit], button")) return;

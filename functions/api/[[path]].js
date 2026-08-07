@@ -180,6 +180,26 @@ async function route({ request, env, waitUntil }) {
     return json(await deleteReviewIgnore(env, await readJson(request)));
   }
 
+  if (path === "/debug-log" && request.method === "POST") {
+    if (env.SOLPA_GANTT_KV) {
+      const body = await readJson(request);
+      const key = `solpa:gantt:debug:${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+      await env.SOLPA_GANTT_KV.put(key, JSON.stringify(body).slice(0, 2000), { expirationTtl: 3600 });
+    }
+    return json({ ok: true });
+  }
+
+  if (path === "/debug-log" && request.method === "GET") {
+    if (!env.SOLPA_GANTT_KV) return json({ entries: [] });
+    const list = await env.SOLPA_GANTT_KV.list({ prefix: "solpa:gantt:debug:" });
+    const entries = [];
+    for (const item of (list.keys || []).slice(-30)) {
+      const value = await env.SOLPA_GANTT_KV.get(item.name);
+      if (value) entries.push({ key: item.name, value });
+    }
+    return json({ entries });
+  }
+
   if (path === "/review-alerts" && request.method === "POST") {
     return json(await handleReviewAlerts(env, await readJson(request)));
   }
