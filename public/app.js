@@ -196,6 +196,7 @@ const state = {
 let lastReviewAlertSyncAt = 0;
 let projectReviewReportMemoSignature = null;
 let projectReviewReportMemoValue = null;
+let memoAutosaveSnapshot = null;
 
 function derivedDataSignature() {
   return [
@@ -504,6 +505,7 @@ function bindEvents() {
   });
   window.addEventListener("dragover", preventEditorFileDropNavigation);
   window.addEventListener("drop", preventEditorFileDropNavigation);
+  window.addEventListener("beforeunload", flushMemoAutosaveBeforeUnload);
   document.querySelectorAll("[data-file-preview-close]").forEach((target) => {
     target.addEventListener("click", closeFilePreview);
   });
@@ -8934,6 +8936,7 @@ function openGroupEditor(row) {
 }
 
 function closeEditor() {
+  void flushMemoAutosave();
   state.editorOpen = false;
   state.editorMode = "task";
   state.editorRowId = "";
@@ -11927,6 +11930,7 @@ async function deleteReviewIgnoreFromPanel(button) {
 }
 
 function syncEditor() {
+  void flushMemoAutosave();
   state.planEdit = { pageId: "", editable: false, snapshot: "", dirty: false };
   const groupRow = state.editorMode === "group" ? editorGroupRow() : null;
   const task = state.editorMode === "group" ? null : selectedTask();
@@ -11947,6 +11951,7 @@ function syncEditor() {
     els.projectField.value = "";
     els.detailField.value = "";
     els.descriptionField.value = "";
+    memoAutosaveSnapshot = null;
     els.startField.value = todayString();
     els.endField.value = todayString();
     els.statusField.value = "";
@@ -11971,6 +11976,7 @@ function syncEditor() {
   els.projectField.value = task.project;
   els.detailField.value = task.detail;
   els.descriptionField.value = task.description || "";
+  memoAutosaveSnapshot = { mode: "task", taskId: task.id, baseline: els.descriptionField.value };
   els.startField.value = task.start;
   els.endField.value = task.end;
   els.statusField.value = task.status;
@@ -12148,6 +12154,7 @@ function renderTaskSourceContent(pageId, result) {
     !els.descriptionField.value.trim()
   ) {
     els.descriptionField.value = seedText;
+    if (memoAutosaveSnapshot) memoAutosaveSnapshot.baseline = els.descriptionField.value;
   }
 }
 
@@ -12378,6 +12385,12 @@ function syncGroupEditor(row) {
   els.detailField.value = "";
   els.titleField.value = row.title;
   els.descriptionField.value = projectMetaTaskForRow(row)?.description || state.groupNotes?.[row.id] || "";
+  memoAutosaveSnapshot = {
+    mode: "group",
+    metaTaskId: projectMetaTaskForRow(row)?.id || "",
+    rowId: row.id,
+    baseline: els.descriptionField.value,
+  };
   els.startField.value = row.start || todayString();
   els.endField.value = row.end || row.start || todayString();
   els.statusField.value = "";
@@ -12753,6 +12766,16 @@ async function saveGroupEditor() {
   else delete state.groupNotes[finalRowId];
   state.editorRowId = finalRowId;
 
+  const descriptionSaved = metaTask ? String(metaTask.description || "") === nextNote : String(state.groupNotes[finalRowId] || "") === nextNote;
+  if (descriptionSaved) {
+    memoAutosaveSnapshot = {
+      mode: "group",
+      metaTaskId: metaTask?.id || "",
+      rowId: finalRowId,
+      baseline: els.descriptionField.value,
+    };
+  }
+
   const prefsChanged = JSON.stringify(previousRanges) !== JSON.stringify(state.groupRanges || {}) || JSON.stringify(previousNotes) !== JSON.stringify(state.groupNotes || {});
   if (prefsChanged) {
     const nextRanges = { ...(state.groupRanges || {}) };
@@ -12830,6 +12853,89 @@ async function saveEditor() {
 
   const rescheduleMode = editorRescheduleMode(task, optimistic);
   await applyBulkTaskUpdates([optimistic], `"${task.detail || task.title}" 편집 저장`, { rescheduleMode });
+  const savedTask = state.tasks.find((item) => item.id === task.id);
+  if (savedTask && String(savedTask.description || "") === patch.description) {
+    memoAutosaveSnapshot = { mode: "task", taskId: task.id, baseline: els.descriptionField.value };
+  }
+}
+
+async function flushMemoAutosave() {
+  const snapshot = memoAutosaveSnapshot;
+  if (!snapshot || !els.descriptionField) return;
+  const value = els.descriptionField.value;
+  if (value === snapshot.baseline) return;
+
+  snapshot.baseline = value;
+  memoAutosaveSnapshot = null;
+
+  try {
+    if (snapshot.mode === "task") {
+      const task = state.tasks.find((item) => item.id === snapshot.taskId);
+      if (!task) return;
+      await patchTask(task.id, { ...task, description: value });
+      task.description = value;
+      showToast("내용을 저장했습니다.");
+      return;
+    }
+
+    if (snapshot.mode === "group") {
+      if (snapshot.metaTaskId) {
+        const metaTask = state.tasks.find((item) => item.id === snapshot.metaTaskId);
+        if (!metaTask) return;
+        await patchTask(metaTask.id, { ...metaTask, description: value });
+        metaTask.description = value;
+        return;
+      }
+
+      state.groupNotes = { ...(state.groupNotes || {}) };
+      if (value) state.groupNotes[snapshot.rowId] = value;
+      else delete state.groupNotes[snapshot.rowId];
+      saveViewPrefs();
+    }
+  } catch (error) {
+    showToast("내용 자동 저장 실패: " + (error.message || String(error)));
+  }
+}
+
+function flushMemoAutosaveBeforeUnload() {
+  const snapshot = memoAutosaveSnapshot;
+  if (!snapshot || !els.descriptionField) return;
+  const value = els.descriptionField.value;
+  if (value === snapshot.baseline) return;
+
+  snapshot.baseline = value;
+  memoAutosaveSnapshot = null;
+
+  if (snapshot.mode === "task") {
+    const task = state.tasks.find((item) => item.id === snapshot.taskId);
+    if (!task) return;
+    void fetch(apiUrl(`/api/tasks/${encodeURIComponent(task.id)}`), {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...task, description: value }),
+      keepalive: true,
+    }).catch(() => {});
+    return;
+  }
+
+  if (snapshot.mode === "group") {
+    if (snapshot.metaTaskId) {
+      const metaTask = state.tasks.find((item) => item.id === snapshot.metaTaskId);
+      if (!metaTask) return;
+      void fetch(apiUrl(`/api/tasks/${encodeURIComponent(metaTask.id)}`), {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...metaTask, description: value }),
+        keepalive: true,
+      }).catch(() => {});
+      return;
+    }
+
+    state.groupNotes = { ...(state.groupNotes || {}) };
+    if (value) state.groupNotes[snapshot.rowId] = value;
+    else delete state.groupNotes[snapshot.rowId];
+    saveViewPrefs();
+  }
 }
 
 async function deleteSelectedTask() {

@@ -1927,6 +1927,7 @@ body.is-dragging .gantt-bar.task .bar-handle::after {
   padding: 18px;
   background: #fbfbfa;
   overflow: auto;
+  overflow-x: hidden;
 }
 
 .editor[hidden] {
@@ -1959,6 +1960,7 @@ body.is-dragging .gantt-bar.task .bar-handle::after {
 }
 
 .plan-content {
+  max-width: 100%;
   margin-top: -16px;
   padding: 0 11px 10px;
   border: 1px solid var(--line);
@@ -1997,6 +1999,7 @@ body.is-dragging .gantt-bar.task .bar-handle::after {
 .plan-content-media {
   display: flex;
   flex-wrap: wrap;
+  max-width: 100%;
   gap: 6px;
   margin-top: 7px;
 }
@@ -2017,6 +2020,7 @@ body.is-dragging .gantt-bar.task .bar-handle::after {
 
 .plan-file {
   display: inline-flex;
+  flex: 0 1 auto;
   align-items: center;
   gap: 4px;
   max-width: 100%;
@@ -2036,6 +2040,12 @@ body.is-dragging .gantt-bar.task .bar-handle::after {
 .plan-media-item {
   position: relative;
   display: inline-flex;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.plan-media-item .plan-file {
+  max-width: calc(100% - 10px);
 }
 
 .plan-media-remove {
@@ -2071,6 +2081,7 @@ body.is-dragging .gantt-bar.task .bar-handle::after {
 
 .plan-attach-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
   margin-top: 7px;
@@ -2093,8 +2104,12 @@ body.is-dragging .gantt-bar.task .bar-handle::after {
 }
 
 .plan-attach-status {
+  min-width: 0;
   color: var(--muted);
   font-size: 11.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 #descriptionField.has-plan-content {
@@ -2118,12 +2133,14 @@ body.is-dragging .gantt-bar.task .bar-handle::after {
 
 .task-form {
   display: grid;
+  max-width: 100%;
   gap: 16px;
 }
 
 .task-form label,
 .color-field {
   display: grid;
+  min-width: 0;
   gap: 7px;
   margin: 0;
   padding: 0;
@@ -2236,10 +2253,15 @@ body.is-dragging .gantt-bar.task .bar-handle::after {
 }
 
 .editor-actions {
-  margin-top: 4px;
+  position: sticky;
+  bottom: -18px;
+  z-index: 5;
   display: flex;
   justify-content: space-between;
   gap: 10px;
+  margin-top: 12px;
+  padding: 10px 0 12px;
+  background: #fbfbfa;
 }
 
 .toast {
