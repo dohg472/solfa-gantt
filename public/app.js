@@ -1195,6 +1195,12 @@ window.addEventListener("DOMContentLoaded", () => {
       node = node.parentElement;
     }
     const rowEl = event.target.closest?.(".task-row");
+    const allRows = document.querySelectorAll("#taskTable .task-row");
+    const firstRow = allRows[0]?.getBoundingClientRect();
+    const lastRow = allRows[allRows.length - 1]?.getBoundingClientRect();
+    const stack = document.elementsFromPoint(event.clientX, event.clientY)
+      .slice(0, 6)
+      .map((el) => `${el.tagName}.${String(el.className).split(" ")[0]}`);
     const info = {
       type: `capture-${kind}`,
       chain: chain.join(">"),
@@ -1202,6 +1208,14 @@ window.addEventListener("DOMContentLoaded", () => {
       rowId: (rowEl?.dataset.taskId || rowEl?.dataset.rowId || "").slice(0, 8),
       suppress: Boolean(state.suppressClick),
       panMode: Boolean(state.panMode),
+      x: Math.round(event.clientX),
+      y: Math.round(event.clientY),
+      stack: stack.join(">"),
+      rowCount: allRows.length,
+      firstRowTop: firstRow ? Math.round(firstRow.top) : null,
+      lastRowBottom: lastRow ? Math.round(lastRow.bottom) : null,
+      scrollTop: Math.round(document.getElementById("ganttScroll")?.scrollTop || 0),
+      zoomRatio: Math.round((window.outerWidth / window.innerWidth) * 100) / 100,
     };
     window.setTimeout(() => {
       info.editorOpenAfter = state.editorOpen;
