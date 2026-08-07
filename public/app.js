@@ -1179,6 +1179,37 @@ async function sendClickDebug(info) {
     });
   } catch {}
 }
+
+window.addEventListener("DOMContentLoaded", () => {
+  void sendClickDebug({ type: "boot", ua: navigator.userAgent.slice(0, 80), vw: window.innerWidth });
+});
+
+["click", "dblclick"].forEach((kind) => {
+  document.addEventListener(kind, (event) => {
+    const insideTable = event.target.closest?.("#taskTable");
+    if (!insideTable) return;
+    const chain = [];
+    let node = event.target;
+    for (let i = 0; node && node !== document.body && i < 5; i++) {
+      chain.push(`${node.tagName}.${String(node.className).split(" ")[0]}`);
+      node = node.parentElement;
+    }
+    const rowEl = event.target.closest?.(".task-row");
+    const info = {
+      type: `capture-${kind}`,
+      chain: chain.join(">"),
+      isGroupRow: Boolean(rowEl?.classList.contains("group-row")),
+      rowId: (rowEl?.dataset.taskId || rowEl?.dataset.rowId || "").slice(0, 8),
+      suppress: Boolean(state.suppressClick),
+      panMode: Boolean(state.panMode),
+    };
+    window.setTimeout(() => {
+      info.editorOpenAfter = state.editorOpen;
+      info.editorHiddenAfter = els.editor?.hidden;
+      void sendClickDebug(info);
+    }, 350);
+  }, { capture: true });
+});
 let appUpdatePending = false;
 
 async function checkAppVersion() {
