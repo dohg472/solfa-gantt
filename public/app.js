@@ -2260,7 +2260,11 @@ function isCompletedUploadProject(tasks) {
   if (!uploadFinished) return false;
   if (daysBetween(latestUploadEnd, todayString()) <= COMPLETED_HIDE_GRACE_DAYS) return false;
 
-  return !tasks.some((task) => compareDate(task.end, latestUploadEnd) > 0 && !isDoneTask(task));
+  return !tasks.some((task) =>
+    compareDate(task.end, latestUploadEnd) > 0 &&
+    !isDoneTask(task) &&
+    !(isProductionTask(task) && daysBetween(task.end, todayString()) >= MISSING_UPLOAD_STALE_DAYS)
+  );
 }
 
 function shouldHideProjectByDefault(tasks) {
