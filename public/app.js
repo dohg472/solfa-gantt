@@ -1168,7 +1168,46 @@ function renderSearchControls() {
   els.searchNextButton.title = disabled ? label : `다음 검색 결과 · ${label}`;
 }
 
+const APP_ASSET_VERSION = (document.querySelector('script[src*="app.js"]')?.src.match(/[?&]v=([\w-]+)/) || [])[1] || "";
+let appUpdatePending = false;
+
+async function checkAppVersion() {
+  if (!APP_ASSET_VERSION || appUpdatePending) return;
+  try {
+    const response = await fetch("/", { cache: "no-store" });
+    if (!response.ok) return;
+    const html = await response.text();
+    const latest = (html.match(/app\.js\?v=([\w-]+)/) || [])[1] || "";
+    if (!latest || latest === APP_ASSET_VERSION) return;
+    appUpdatePending = true;
+    applyAppUpdateWhenIdle();
+  } catch {}
+}
+
+function applyAppUpdateWhenIdle() {
+  if (!appUpdatePending) return;
+  const busy = state.drag || state.selectionDrag || state.createDrag || state.rowReorderDrag ||
+    state.tableResizeDrag || state.timelineNavigatorDrag || !els.inputModal?.hidden ||
+    (state.editorOpen && els.descriptionField && memoAutosaveSnapshot &&
+      els.descriptionField.value !== memoAutosaveSnapshot.baseline);
+  if (document.hidden) {
+    window.location.reload();
+    return;
+  }
+  if (busy) {
+    setTimeout(applyAppUpdateWhenIdle, 30000);
+    return;
+  }
+  showToast("새 버전이 배포되어 화면을 갱신합니다.");
+  setTimeout(() => window.location.reload(), 1500);
+}
+
 function setupSync() {
+  window.setInterval(checkAppVersion, 10 * 60 * 1000);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") checkAppVersion();
+    else if (appUpdatePending) window.location.reload();
+  });
   try {
     if (typeof BroadcastChannel === "function") {
       state.syncChannel = new BroadcastChannel(SYNC_CHANNEL_NAME);
