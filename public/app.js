@@ -4408,6 +4408,9 @@ function renderRows(rows, criticalTaskIds) {
       const model = state.rows.find((item) => item.id === element.dataset.rowId);
       if (!model) return;
       selectRow(model, event, { focusTimeline: false });
+      if (["channel", "project"].includes(model.kind) && !isSelectionModifier(event) && !event.target.closest("[data-inline-edit], [data-range-edit], button")) {
+        openGroupEditor(model);
+      }
     });
     element.addEventListener("dblclick", (event) => {
       if (event.target.closest("[data-inline-edit], [data-range-edit], button")) return;
@@ -4931,6 +4934,7 @@ function renderBars(rows, dayWidth, criticalTaskIds) {
       bar.addEventListener("click", (event) => {
         if (state.drag?.moved || state.suppressClick) return;
         selectRow(row, event);
+        if (!isSelectionModifier(event)) openGroupEditor(row);
         event.stopPropagation();
       });
       if (editableGroup) {
