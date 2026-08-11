@@ -1095,6 +1095,7 @@ async function ensureWriteDatabaseProperties(env, database) {
     { name: envValue(env, "NOTION_WRITE_ASSIGNEE_PROP") || "담당자", def: { rich_text: {} }, aliases: ["담당자", "사람"] },
     { name: envValue(env, "NOTION_WRITE_DESCRIPTION_PROP") || "메모", def: { rich_text: {} }, aliases: ["메모", "내용"] },
     { name: envValue(env, "NOTION_WRITE_ORIGIN_ID_PROP") || "원본 ID", def: { rich_text: {} }, aliases: ["원본 ID", "원본ID"] },
+    { name: "상위 프로젝트", def: { relation: { database_id: database.id, type: "dual_property", dual_property: { synced_property_name: "하위 일정" } } }, aliases: ["상위 항목", "상위프로젝트"] },
   ];
 
   const propNamesNormalized = new Map(Object.keys(props).map((name) => [normalizeLabel(name), name]));
@@ -1150,6 +1151,11 @@ function summarizeNotionSchema(database, kind, env) {
     const writeAssigneeProp = envValue(env, "NOTION_WRITE_ASSIGNEE_PROP") || "담당자";
     const writeDescriptionProp = envValue(env, "NOTION_WRITE_DESCRIPTION_PROP") || "메모";
     const writeOriginIdProp = envValue(env, "NOTION_WRITE_ORIGIN_ID_PROP") || "원본 ID";
+    const writeParentProp = envValue(env, "NOTION_WRITE_PARENT_PROP") || "상위 프로젝트";
+    const writeParentCandidate = byName(writeParentProp);
+    const writeParentRelation = writeParentCandidate?.type === "relation"
+      ? writeParentCandidate
+      : byAliases(["상위 항목"], ["relation"]);
     return {
       databaseId: database.id,
       titleName: byName(writeTitleProp)?.name || byType("title")?.name,
@@ -1170,6 +1176,8 @@ function summarizeNotionSchema(database, kind, env) {
       descriptionType: byName(writeDescriptionProp)?.type || "rich_text",
       originIdName: byName(writeOriginIdProp)?.name || byAliases(["원본 ID", "원본ID"])?.name,
       originIdType: byName(writeOriginIdProp)?.type || "rich_text",
+      parentRelationName: writeParentRelation?.name,
+      parentRelationType: writeParentRelation?.type || "relation",
     };
   }
 
@@ -1232,11 +1240,13 @@ function pageToTask(page, schema, source) {
   const assigneeIds = readPeopleIds(props[schema.assigneeName]);
   const description = readPropertyText(props[schema.descriptionName]) || "";
   const originId = readPropertyText(props[schema.originIdName]) || findOriginMarker(description);
+  const parentPageId = props[schema.parentRelationName]?.relation?.[0]?.id || "";
   const start = readDateStart(props[schema.dateName]) || toDateOnly(page.created_time) || todayString();
   const end = readDateEnd(props[schema.dateName]) || start;
   const base = normalizeTask({
     id: page.id,
     originId,
+    parentPageId,
     source,
     syncMode: source === "source" ? "read-only" : "target",
     title,
@@ -1261,6 +1271,9 @@ function pageToTask(page, schema, source) {
 
 async function createTargetPage(env, task, schema) {
   const properties = taskToNotionProperties(task, schema);
+  if (task.parentPageId && schema.parentRelationName) {
+    properties[schema.parentRelationName] = { relation: [{ id: task.parentPageId }] };
+  }
   return notionRequest(env, "/v1/pages", {
     method: "POST",
     body: JSON.stringify({
@@ -1271,9 +1284,13 @@ async function createTargetPage(env, task, schema) {
 }
 
 async function updateTargetPage(env, pageId, patch, schema) {
+  const properties = taskToNotionProperties(patch, schema);
+  if (patch.parentPageId && schema.parentRelationName) {
+    properties[schema.parentRelationName] = { relation: [{ id: patch.parentPageId }] };
+  }
   return notionRequest(env, `/v1/pages/${pageId}`, {
     method: "PATCH",
-    body: JSON.stringify({ properties: taskToNotionProperties(patch, schema) }),
+    body: JSON.stringify({ properties }),
   });
 }
 
@@ -1820,6 +1837,7 @@ function normalizeTask(task) {
   return {
     id: String(task.id || crypto.randomUUID()),
     originId: String(task.originId || ""),
+    parentPageId: String(task.parentPageId || "").trim(),
     source: task.source || "target",
     syncMode: task.syncMode || "target",
     title,
@@ -1861,6 +1879,7 @@ function normalizeTaskPatch(body) {
     predecessorIds: Array.isArray(patch.predecessorIds) ? patch.predecessorIds : [],
     successorIds: Array.isArray(patch.successorIds) ? patch.successorIds : [],
     originId: String(patch.originId || ""),
+    parentPageId: String(patch.parentPageId || "").trim(),
   };
 }
 

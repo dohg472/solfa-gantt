@@ -5743,6 +5743,9 @@ function contextTaskSeed(context) {
   const sourceTask = context.taskId ? state.tasks.find((task) => task.id === context.taskId) : null;
   const channel = sourceTask?.channel || context.channel || (context.kind === "channel" ? context.title : "") || "새 채널";
   const project = sourceTask?.project || context.project || (context.kind === "project" ? context.title : "") || "새 프로젝트";
+  const projectRow = context.kind === "project"
+    ? state.rows.find((row) => row.kind === "project" && row.id === context.rowId)
+    : findProjectRow(channel, project);
   const start = context.date || sourceTask?.start || todayString();
   return {
     title: project || "새 상세일정",
@@ -5753,6 +5756,7 @@ function contextTaskSeed(context) {
     end: "",
     status: "시작 전",
     assignee: sourceTask?.assignee || "",
+    parentPageId: projectMetaTaskForRow(projectRow)?.id || "",
     color: sourceTask?.color || PALETTE[Math.floor(Math.random() * PALETTE.length)],
   };
 }
@@ -5812,6 +5816,17 @@ function liveProjectPickerOptions(channel) {
       options.push({ value: name, label: name });
     });
   return options;
+}
+
+function findProjectRow(channel, project) {
+  const resolvedProjectKey = canonicalProjectKey(resolveProjectAliasName(channel, project));
+  return state.rows.find(
+    (row) =>
+      row.kind === "project" &&
+      !row.hiddenOnly &&
+      sameChannelName(row.channel, channel) &&
+      isSameProjectKey(canonicalProjectKey(resolveProjectAliasName(row.channel, row.title)), resolvedProjectKey),
+  ) || null;
 }
 
 function liveProjectMergeOptions(channel, mergeNames = [], options = {}) {
@@ -12534,7 +12549,15 @@ function editorGroupRow() {
 function projectMetaTaskForRow(row) {
   if (row?.kind !== "project") return null;
   const ids = new Set(row.taskIds || []);
-  return state.tasks.find((task) => ids.has(task.id) && isProjectMetaTask(task)) || null;
+  const directMatch = state.tasks.find((task) => ids.has(task.id) && isProjectMetaTask(task));
+  if (directMatch) return directMatch;
+  const projectKey = canonicalProjectKey(resolveProjectAliasName(row.channel, row.title));
+  return state.tasks.find(
+    (task) =>
+      isProjectMetaTask(task) &&
+      sameChannelName(task.channel, row.channel) &&
+      isSameProjectKey(canonicalProjectKey(projectNameForTask(task)), projectKey),
+  ) || null;
 }
 
 function groupContentScopeId(row) {
@@ -12754,6 +12777,9 @@ async function openCreateTaskModal(seed, copy = {}) {
   const normalizedEnd = compareDate(input.end || normalizedStart, normalizedStart) < 0 ? normalizedStart : input.end || normalizedStart;
   const channel = input.channel || "새 채널";
   const project = input.project || "새 프로젝트";
+  const parentPageId = copy.lockProject
+    ? seed.parentPageId || ""
+    : projectMetaTaskForRow(findProjectRow(channel, project))?.id || "";
   return {
     title: composeTaskTitle(channel, project),
     channel,
@@ -12764,6 +12790,7 @@ async function openCreateTaskModal(seed, copy = {}) {
     end: normalizedEnd,
     status: input.status || "시작 전",
     assignee: input.assignee || "",
+    parentPageId,
     color: input.color || seed.color || colorForDetail(input.detail || seed.detail, PALETTE[0]),
   };
 }
@@ -12841,6 +12868,7 @@ async function createTask(seed) {
     end: compareDate(seed.end || seed.start || todayString(), seed.start || todayString()) < 0 ? seed.start || todayString() : seed.end || seed.start || todayString(),
     status: seed.status || "시작 전",
     assignee: seed.assignee || "",
+    parentPageId: seed.parentPageId || "",
     color: seed.color || PALETTE[Math.floor(Math.random() * PALETTE.length)],
   };
   if (!(await confirmCreateTaskPreview(base))) return;
