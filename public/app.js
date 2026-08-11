@@ -12780,11 +12780,12 @@ async function openCreateTaskModal(seed, copy = {}) {
   const parentPageId = copy.lockProject
     ? seed.parentPageId || ""
     : projectMetaTaskForRow(findProjectRow(channel, project))?.id || "";
+  const detailValue = input.detail || "상세일정";
   return {
-    title: composeTaskTitle(channel, project),
+    title: detailValue,
     channel,
     project,
-    detail: input.detail || "상세일정",
+    detail: detailValue,
     description: input.description || "",
     start: normalizedStart,
     end: normalizedEnd,
